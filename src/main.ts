@@ -1,0 +1,36 @@
+import "./style.css";
+
+type Poll = { id: string; title: string; instructions: string; minSelections: number; maxSelections: number; options: { id: string; title: string; description?: string; images: string[] }[] };
+type Screening = { id: string; slug: string; title: string; venue?: string; bannerImage?: string; startAt: string; stopAt: string; polls: Poll[] };
+const app = document.querySelector<HTMLDivElement>("#app")!;
+const slug = location.pathname.match(/\/s\/([^/]+)/)?.[1] || new URLSearchParams(location.search).get("screening") || "demo";
+const demo: Screening = { id: "demo", slug: "demo", title: "San Diego 48 Hour Film Project", venue: "Screening Room", startAt: new Date(Date.now() - 3600000).toISOString(), stopAt: new Date(Date.now() + 86400000).toISOString(), polls: [{ id: "poster", title: "Best Poster", instructions: "Choose one poster.", minSelections: 1, maxSelections: 1, options: [{ id: "poster-1", title: "Sample Poster", images: [] }] }] };
+let current: Screening;
+const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c] || c));
+const isOpen = (s: Screening) => { const n = Date.now(); return n >= Date.parse(s.startAt) && n <= Date.parse(s.stopAt); };
+function render(s: Screening) {
+  current = s;
+  const banner = s.bannerImage ? ` style="--banner-image:url('${esc(s.bannerImage)}')"` : "";
+  app.innerHTML = `<header class="masthead"${banner}><div class="brand-mark">48</div><div><p class="eyebrow">San Diego 48 Hour Film Project</p><h1>${esc(s.title)}</h1>${s.venue ? `<p class="venue">${esc(s.venue)}</p>` : ""}</div></header><main><section class="intro"><span class="kicker">Audience voting</span><h2>Make your picks.</h2><p>Enter the vote code from your screening ticket. One code covers every poll in this screening.</p><p class="window ${isOpen(s) ? "open" : "closed"}">${isOpen(s) ? "Voting is open" : "Voting is closed"} · ${new Date(s.startAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}–${new Date(s.stopAt).toLocaleTimeString([], { timeStyle: "short" })}</p></section><form id="vote-form"><label class="code-label">Vote code<input id="code" required autocomplete="one-time-code" placeholder="ABC-123" /></label><div id="polls">${s.polls.map(renderPoll).join("")}</div><button class="button primary" type="submit">Submit votes <span>→</span></button><p class="message" role="status"></p></form></main><footer><span>San Diego 48</span><a href="/admin">Admin</a></footer>`;
+  document.querySelector<HTMLFormElement>("#vote-form")!.addEventListener("submit", submitVotes);
+  document.querySelectorAll<HTMLElement>("[data-cycle]").forEach(startCycle);
+}
+function renderPoll(p: Poll) {
+  const options = p.options.map(o => { const type = p.maxSelections === 1 ? "radio" : "checkbox"; const image = o.images.length ? ` data-cycle='${esc(JSON.stringify(o.images))}' style="background-image:url('${esc(o.images[0])}')"` : ""; return `<label class="option"><input type="${type}" name="poll-${p.id}" value="${esc(o.id)}" ${type === "radio" ? "required" : ""}/><span class="option-image"${image}></span><span class="option-copy"><strong>${esc(o.title)}</strong>${o.description ? `<small>${esc(o.description)}</small>` : ""}</span></label>`; }).join("");
+  return `<fieldset class="poll"><legend><span>${esc(p.title)}</span><span class="rule">${p.minSelections === p.maxSelections ? `Select ${p.minSelections}` : `Select ${p.minSelections}–${p.maxSelections}`}</span></legend>${p.instructions ? `<p class="instructions">${esc(p.instructions)}</p>` : ""}<div class="options">${options}</div></fieldset>`;
+}
+function startCycle(el: HTMLElement) { const imgs = JSON.parse(el.dataset.cycle || "[]") as string[]; let i = 0; if (imgs.length > 1) setInterval(() => { i = (i + 1) % imgs.length; el.style.backgroundImage = `url('${imgs[i]}')`; }, 4000); }
+async function submitVotes(e: SubmitEvent) {
+  e.preventDefault(); const form = e.currentTarget as HTMLFormElement; const button = form.querySelector<HTMLButtonElement>("button")!; const msg = form.querySelector<HTMLElement>(".message")!;
+  const selections: Record<string, string[]> = {};
+  current.polls.forEach(p => { selections[p.id] = Array.from(form.querySelectorAll<HTMLInputElement>(`input[name="poll-${p.id}"]:checked`)).map(x => x.value); });
+  button.disabled = true; msg.textContent = "Submitting…";
+  try { const r = await fetch("/api/vote", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ screeningId: current.id, code: form.querySelector<HTMLInputElement>("#code")!.value, selections }) }); const data = await r.json() as { error?: string }; if (!r.ok) throw Error(data.error || "Vote could not be submitted"); msg.className = "message success"; msg.textContent = "Your votes are recorded. Thank you!"; form.reset(); } catch (err) { msg.className = "message error"; msg.textContent = err instanceof Error ? err.message : "Vote could not be submitted"; } finally { button.disabled = false; }
+}
+function renderAdmin() {
+  app.innerHTML = `<header class="masthead"><div class="brand-mark">48</div><div><p class="eyebrow">San Diego 48 Hour Film Project</p><h1>Poll admin</h1></div></header><main><section class="intro"><span class="kicker">Configuration</span><h2>Import or export a screening.</h2><p>Poll packages are ZIP files containing <code>poll.yaml</code> plus images.</p></section><section class="admin-card"><label>Admin token<input id="admin-token" type="password" autocomplete="off" /></label><label>Screening slug<input id="admin-slug" placeholder="screening-slug" /></label><div class="admin-actions"><button id="export" class="button primary">Export ZIP</button><label class="button secondary">Import ZIP<input id="import" type="file" accept=".zip,application/zip" hidden /></label></div><p id="admin-message" class="message" role="status"></p></section></main>`;
+  const token = () => document.querySelector<HTMLInputElement>("#admin-token")!.value; const status = () => document.querySelector<HTMLElement>("#admin-message")!;
+  document.querySelector("#export")!.addEventListener("click", async () => { const name = document.querySelector<HTMLInputElement>("#admin-slug")!.value; const r = await fetch("/api/admin/export/" + encodeURIComponent(name), { headers: { Authorization: "Bearer " + token() } }); if (!r.ok) { status().textContent = "Export failed"; return; } const a = document.createElement("a"); a.href = URL.createObjectURL(await r.blob()); a.download = name + ".zip"; a.click(); });
+  document.querySelector<HTMLInputElement>("#import")!.addEventListener("change", async e => { const file = (e.target as HTMLInputElement).files?.[0]; if (!file) return; const r = await fetch("/api/admin/import", { method: "POST", headers: { Authorization: "Bearer " + token(), "content-type": "application/zip" }, body: file }); status().textContent = r.ok ? "Imported successfully" : "Import failed"; });
+}
+if (location.pathname === "/admin") renderAdmin(); else fetch("/api/screenings/" + encodeURIComponent(slug)).then(r => r.ok ? r.json() as Promise<Screening> : Promise.reject()).then(render).catch(() => render(demo));
