@@ -3,8 +3,8 @@ import "./style.css";
 type Poll = { id: string; title: string; instructions: string; minSelections: number; maxSelections: number; options: { id: string; title: string; description?: string; images: string[] }[] };
 type Screening = { id: string; slug: string; title: string; venue?: string; bannerImage?: string; startAt: string; stopAt: string; polls: Poll[] };
 const app = document.querySelector<HTMLDivElement>("#app")!;
-const slug = location.pathname.match(/\/s\/([^/]+)/)?.[1] || new URLSearchParams(location.search).get("screening") || "demo";
-const demo: Screening = { id: "demo", slug: "demo", title: "San Diego 48 Hour Film Project", venue: "Screening Room", startAt: new Date(Date.now() - 3600000).toISOString(), stopAt: new Date(Date.now() + 86400000).toISOString(), polls: [{ id: "poster", title: "Best Poster", instructions: "Choose one poster.", minSelections: 1, maxSelections: 1, options: [{ id: "poster-1", title: "Sample Poster", images: [] }] }] };
+const slug = location.pathname.match(/\/s\/([^/]+)/)?.[1] || new URLSearchParams(location.search).get("screening");
+function unavailable(message: string) { app.innerHTML = `<header class="masthead"><div class="brand-mark">48</div><div><p class="eyebrow">San Diego 48 Hour Film Project</p><h1>Audience voting</h1></div></header><main><section class="intro"><h2>${esc(message)}</h2><p>No votes can be submitted here yet. Check your screening's QR code or ask the screening staff for the correct link.</p></section></main>`; }
 let current: Screening;
 const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c] || c));
 const isOpen = (s: Screening) => { const n = Date.now(); return n >= Date.parse(s.startAt) && n <= Date.parse(s.stopAt); };
@@ -33,4 +33,4 @@ function renderAdmin() {
   document.querySelector("#export")!.addEventListener("click", async () => { const name = document.querySelector<HTMLInputElement>("#admin-slug")!.value; const r = await fetch("/api/admin/export/" + encodeURIComponent(name), { headers: { Authorization: "Bearer " + token() } }); if (!r.ok) { status().textContent = "Export failed"; return; } const a = document.createElement("a"); a.href = URL.createObjectURL(await r.blob()); a.download = name + ".zip"; a.click(); });
   document.querySelector<HTMLInputElement>("#import")!.addEventListener("change", async e => { const file = (e.target as HTMLInputElement).files?.[0]; if (!file) return; const r = await fetch("/api/admin/import", { method: "POST", headers: { Authorization: "Bearer " + token(), "content-type": "application/zip" }, body: file }); status().textContent = r.ok ? "Imported successfully" : "Import failed"; });
 }
-if (location.pathname === "/admin") renderAdmin(); else fetch("/api/screenings/" + encodeURIComponent(slug)).then(r => r.ok ? r.json() as Promise<Screening> : Promise.reject()).then(render).catch(() => render(demo));
+if (location.pathname === "/admin") renderAdmin(); else if (!slug) unavailable("No screening selected"); else fetch("/api/screenings/" + encodeURIComponent(slug)).then(r => r.ok ? r.json() as Promise<Screening> : Promise.reject()).then(render).catch(() => unavailable("Screening not found"));

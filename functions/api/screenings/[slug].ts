@@ -1,4 +1,4 @@
-import type { Env, Screening } from "../types";
+import type { Env, Screening } from "../../types";
 export const onRequestGet: PagesFunction<Env> = async ({ env, params }) => {
   const slug = String(params.slug || "");
   const screening = await env.DB.prepare("SELECT * FROM screenings WHERE slug = ?").bind(slug).first<any>();
