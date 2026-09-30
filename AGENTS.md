@@ -11,8 +11,9 @@
 - D1 stores screenings, polls, options, vote-code hashes, and votes.
 - R2 stores option images and screening banner images via the `MEDIA` binding.
 - `migrations/0001_initial.sql` is the initial D1 schema.
-- `wrangler.toml` declares the Pages, D1, and R2 bindings. Replace the D1 placeholder before deployment.
-- GitHub Actions deploys `dist/` using `cloudflare/wrangler-action@v3`.
+- `wrangler.toml` declares the live Pages, D1, and R2 bindings; the D1 ID is already configured and the initial migration has been applied remotely.
+- GitHub Actions deploys `dist/` using `cloudflare/wrangler-action@v3` with Wrangler 4. The GitHub Actions Cloudflare token/account secrets are installed and a push-driven deploy has succeeded.
+- The Pages project is Direct Upload (`source: null`), not Git-connected. Pushes still deploy through the GitHub Actions workflow; do not claim native Pages Git integration.
 
 ## Implemented behavior
 
@@ -36,19 +37,19 @@ npm test
 npm run build
 ```
 
-## Cloudflare setup still required
+## Cloudflare status
 
-1. Create a Pages project named `vote-sandiego48-com`.
-2. Create a D1 database named `vote-sandiego48-com`; put its ID in `wrangler.toml`.
-3. Create an R2 bucket named `vote-sandiego48-com`.
-4. Apply the migration with Wrangler.
-5. Set the Pages secret `ADMIN_TOKEN`.
-6. Add GitHub Actions secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
-7. Attach `vote.sandiego48.com` to the Pages project and verify DNS/HTTPS separately.
+- Pages project, D1 database, and R2 bucket named `vote-sandiego48-com` exist; the initial D1 migration is applied.
+- `vote.sandiego48.com` is attached to Pages and its Cloudflare DNS record is a proxied CNAME to `vote-sandiego48-com.pages.dev`. Pages domain status and both verification/validation statuses were confirmed active; the hostname was also checked through a headless browser.
+- GitHub Actions secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are configured, and a push-driven Wrangler 4 deployment succeeded.
+- **Not configured:** Pages secret `ADMIN_TOKEN`. The shared-token admin interface remains unusable until that secret is set and is not production hardened.
+- The Pages project is Direct Upload, with deployment via GitHub Actions; it is **not** natively Git-connected.
+- The root URL deliberately says “No screening selected”; there is no live screening package or generated vote code yet. This is a deployed scaffold, **not a voting-ready service**.
 
 ## Important follow-up work
 
 - Add admin endpoints/UI for screening CRUD, admin-overridden start/stop times, code generation, and vote results/export.
+- Add tests for concurrent use of the same code and make vote-code consumption atomic with vote insertion; the current read-then-batch path is **not safe against simultaneous submissions**.
 - Add package validation: required fields, aspect-ratio/quantity enforcement, duplicate image names, maximum image sizes, and path traversal rejection.
 - Ensure screening banner files are imported into R2 and exported from R2; the current import stores option image files and persists the banner key, but banner ingestion should be made explicit.
 - Make import transactional or stage/validate before mutating D1/R2.
@@ -60,6 +61,6 @@ npm run build
 
 ## Do not
 
-- Commit D1 IDs, API tokens, admin tokens, or `.env` files.
+- Do not commit API tokens, admin tokens, or `.env` files. D1 IDs are resource identifiers, not credentials; `wrangler.toml` already contains the database ID.
 - Treat Pages project creation, GitHub repo creation, deployment, custom-domain attachment, and DNS cutover as the same operation; verify each separately.
 - Remove or migrate `vote48hfp.com` until the replacement is deployed and tested against a real screening package.

@@ -15,13 +15,14 @@ Poll packages are ZIP files containing `poll.yaml` plus an `images/` directory. 
 ```sh
 npm install
 npm run dev
+npm run typecheck
 npm test
 npm run build
 ```
 
-Set `database_id` in `wrangler.toml`, apply `migrations/0001_initial.sql` with Wrangler, and configure `ADMIN_TOKEN` as a Pages secret before deploying. GitHub Actions expects `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repository secrets.
+The Pages project, D1 database, R2 bucket, domain/DNS, and initial migration are configured. GitHub Actions has Cloudflare token/account secrets and a verified successful push-driven deploy. The project uses Direct Upload via Actions, not native Pages Git integration. The `ADMIN_TOKEN` Pages secret is still unset, so the admin UI cannot authenticate yet.
 
-The public route is `/s/<screening-slug>`. `/admin` provides the initial package import/export UI.
+The public route is `/s/<screening-slug>`. The root intentionally shows “No screening selected” until a real screening package is imported; no demo ballot is served. `/admin` provides the initial package import/export UI, but it is not yet production hardened.
 
 ## YAML package shape
 
@@ -30,8 +31,8 @@ screening:
   slug: spring-screening
   title: Spring Screening
   timezone: America/Los_Angeles
-  start_at: 2026-05-01T18:00:00-07:00
-  stop_at: 2026-05-01T23:00:00-07:00
+  start_at: "2026-05-01T18:00:00-07:00"
+  stop_at: "2026-05-01T23:00:00-07:00"
 polls:
   - slug: poster
     title: Best Poster
