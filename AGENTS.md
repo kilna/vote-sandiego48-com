@@ -9,7 +9,7 @@
 - Vite + TypeScript frontend in `src/`; Cloudflare Pages serves the built `dist/` directory.
 - Pages Functions in `functions/api/` provide the runtime API.
 - D1 stores screenings, polls, options, vote-code hashes, and votes.
-- R2 stores option images and screening banner images.
+- R2 stores option images and screening banner images via the `MEDIA` binding.
 - `migrations/0001_initial.sql` is the initial D1 schema.
 - `wrangler.toml` declares the Pages, D1, and R2 bindings. Replace the D1 placeholder before deployment.
 - GitHub Actions deploys `dist/` using `cloudflare/wrangler-action@v3`.

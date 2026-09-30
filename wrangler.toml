@@ -5,9 +5,9 @@ pages_build_output_dir = "dist"
 [[d1_databases]]
 binding = "DB"
 database_name = "vote-sandiego48-com"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "f44fa4cf-711a-4618-9469-86e78d44aa34"
 migrations_dir = "migrations"
 
 [[r2_buckets]]
-binding = "ASSETS"
+binding = "MEDIA"
 bucket_name = "vote-sandiego48-com"
