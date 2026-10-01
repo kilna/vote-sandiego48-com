@@ -26,14 +26,36 @@ function render(s: Screening) {
   document.querySelector<HTMLFormElement>("#vote-form")!.addEventListener("submit", submitVotes);
   document.querySelectorAll<HTMLElement>("[data-cycle]").forEach(startCycle);
 }
-function cycleSeconds(value: unknown) { const seconds = typeof value === "number" ? value : Number(value); return Number.isInteger(seconds) && seconds >= 1 && seconds <= 60 ? seconds : 1; }
+function cycleSeconds(value: unknown) { const seconds = typeof value === "number" ? value : Number(value); return Number.isInteger(seconds) && seconds >= 1 && seconds <= 60 ? seconds : 2; }
 function renderPoll(p: Poll) {
   const ratio = frameRatio(p.imageConfig?.aspectRatio);
   const seconds = cycleSeconds(p.imageConfig?.cycle);
-  const options = p.options.map(o => { const type = p.maxSelections === 1 ? "radio" : "checkbox"; const image = o.images.length ? ` data-cycle='${esc(JSON.stringify(o.images))}' data-seconds="${seconds}" style="aspect-ratio:${ratio};background-image:url('${esc(o.images[0])}')"` : ` style="aspect-ratio:${ratio}"`; return `<label class="option"><input type="${type}" name="poll-${p.id}" value="${esc(o.id)}" ${type === "radio" ? "required" : ""}/><span class="option-image"${image}></span><span class="option-copy"><strong>${esc(o.title)}</strong>${o.description ? `<small>${esc(o.description)}</small>` : ""}</span></label>`; }).join("");
+  const options = p.options.map(o => { const type = p.maxSelections === 1 ? "radio" : "checkbox"; const image = o.images.length ? ` data-cycle='${esc(JSON.stringify(o.images))}' data-seconds="${seconds}" style="aspect-ratio:${ratio}"` : ` style="aspect-ratio:${ratio}"`; return `<label class="option"><input type="${type}" name="poll-${p.id}" value="${esc(o.id)}" ${type === "radio" ? "required" : ""}/><span class="option-image"${image}></span><span class="option-copy"><strong>${esc(o.title)}</strong>${o.description ? `<small>${esc(o.description)}</small>` : ""}</span></label>`; }).join("");
   return `<fieldset class="poll"><legend><span>${esc(p.title)}</span><span class="rule">${p.minSelections === p.maxSelections ? `Select ${p.minSelections}` : `Select ${p.minSelections}–${p.maxSelections}`}</span></legend>${p.instructions ? `<p class="instructions">${esc(p.instructions)}</p>` : ""}<div class="options">${options}</div></fieldset>`;
 }
-function startCycle(el: HTMLElement) { const imgs = JSON.parse(el.dataset.cycle || "[]") as string[]; let i = 0; if (imgs.length > 1) setInterval(() => { i = (i + 1) % imgs.length; el.style.backgroundImage = `url('${imgs[i]}')`; }, cycleSeconds(el.dataset.seconds) * 1000); }
+function startCycle(el: HTMLElement) {
+  const imgs = JSON.parse(el.dataset.cycle || "[]") as string[];
+  if (!imgs.length) return;
+  const layers = imgs.map((src, index) => {
+    const layer = document.createElement("span");
+    layer.className = index === 0 ? "still is-shown" : "still";
+    layer.style.backgroundImage = `url('${src.replace(/'/g, "%27")}')`;
+    el.appendChild(layer);
+    return layer;
+  });
+  if (layers.length < 2) return;
+  const fadeMs = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 500;
+  let shown = 0;
+  let z = 1;
+  window.setInterval(() => {
+    const outgoing = layers[shown];
+    shown = (shown + 1) % layers.length;
+    const incoming = layers[shown];
+    incoming.style.zIndex = String(++z);
+    incoming.classList.add("is-shown");
+    window.setTimeout(() => outgoing.classList.remove("is-shown"), fadeMs);
+  }, cycleSeconds(el.dataset.seconds) * 1000);
+}
 async function submitVotes(e: SubmitEvent) {
   e.preventDefault(); const form = e.currentTarget as HTMLFormElement; const button = form.querySelector<HTMLButtonElement>("button")!; const msg = form.querySelector<HTMLElement>(".message")!;
   const selections: Record<string, string[]> = {};

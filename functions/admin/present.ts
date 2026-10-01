@@ -38,9 +38,10 @@ export type ImageConfig = { aspectRatio: string; cycle: number };
 
 export const imageCycleMin = 1;
 export const imageCycleMax = 60;
+export const imageCycleDefault = 2;
 
 export function imageCycleSeconds(value: unknown) {
-  return typeof value === "number" && Number.isInteger(value) && value >= imageCycleMin && value <= imageCycleMax ? value : imageCycleMin;
+  return typeof value === "number" && Number.isInteger(value) && value >= imageCycleMin && value <= imageCycleMax ? value : imageCycleDefault;
 }
 
 export function parseKeys(raw: string | null) {
@@ -61,7 +62,7 @@ export function parseImageConfig(raw: string | null): ImageConfig {
   } catch {
     /* Fall through to the ballot default. */
   }
-  return { aspectRatio: "16:9", cycle: imageCycleMin };
+  return { aspectRatio: "16:9", cycle: imageCycleDefault };
 }
 
 export function presentOption(row: OptionRow) {

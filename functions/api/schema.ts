@@ -1,4 +1,4 @@
-import { imageCycleMax, imageCycleMin } from "../admin/present";
+import { imageCycleDefault, imageCycleMax, imageCycleMin } from "../admin/present";
 
 const SLUG = "^[a-z0-9]+(?:-[a-z0-9]+)*$";
 const SLUG_MESSAGE = "Use lowercase letters, numbers, and single hyphens.";
@@ -72,7 +72,7 @@ export type Validation =
   | { ok: true; value: Record<string, unknown> }
   | { ok: false; fields: Record<string, string> };
 
-const imageConfigDescription = "How the ballot frames and swaps stills. aspectRatio is width:height, such as 16:9 for film or 2:3 for a poster, and the public ballot uses it as the frame. cycle is how many seconds each still stays on screen before the next one. It is an integer from 1 to 60 and defaults to 1. An option shows every image uploaded for it. The API does not measure those files or check them against the aspect ratio.";
+const imageConfigDescription = "How the ballot frames and swaps stills. aspectRatio is width:height, such as 16:9 for film or 2:3 for a poster, and the public ballot uses it as the frame. cycle is how many seconds each still stays on screen before the next one. It is an integer from 1 to 60 and defaults to 2. An option shows every image uploaded for it, and more than one still crossfades. The API does not measure those files or check them against the aspect ratio.";
 
 const votingField: StringField = {
   type: "string",
@@ -119,7 +119,7 @@ export const pollWrite: ObjectSchema = {
     instructions: { type: "string", nullable: true, description: "Optional text under the heading. Send null to clear it.", example: "One vote for the film you want to win.", maxLength: 2000, default: null },
     minSelections: { type: "integer", description: "Fewest options a voter must choose. Defaults to 1. When omitted and maxSelections is set, maxSelections must still be at least this value.", example: 1, minimum: 0, maximum: 100, default: 1 },
     maxSelections: { type: "integer", description: "Most options a voter may choose. Defaults to minSelections.", example: 1, minimum: 0, maximum: 100 },
-    imageConfig: { type: "imageConfig", description: imageConfigDescription, default: { aspectRatio: "16:9", cycle: imageCycleMin } },
+    imageConfig: { type: "imageConfig", description: imageConfigDescription, default: { aspectRatio: "16:9", cycle: imageCycleDefault } },
     sortOrder: { type: "integer", description: "Position among this screening's polls. Lower numbers come first. Defaults to the next position.", example: 0, minimum: 0, maximum: 10000 },
   },
   refine: (value, mode) => selectionOrder(value, mode),
@@ -278,7 +278,7 @@ function validateImageConfig(input: unknown): { value: unknown } | { error: stri
   if (unknown.length) return { error: `Unknown field ${unknown[0]}.` };
   if (typeof source.aspectRatio !== "string" || !new RegExp(RATIO).test(source.aspectRatio.trim())) return { error: "aspectRatio must look like 16:9 or 2:3." };
   if (source.cycle !== undefined && (typeof source.cycle !== "number" || !Number.isInteger(source.cycle) || source.cycle < imageCycleMin || source.cycle > imageCycleMax)) return { error: `cycle must be an integer from ${imageCycleMin} to ${imageCycleMax}.` };
-  return { value: { aspectRatio: source.aspectRatio.trim(), cycle: source.cycle === undefined ? imageCycleMin : source.cycle } };
+  return { value: { aspectRatio: source.aspectRatio.trim(), cycle: source.cycle === undefined ? imageCycleDefault : source.cycle } };
 }
 
 export type AdminRoute = {
@@ -426,7 +426,7 @@ const imageConfigSchema = {
   required: ["aspectRatio"],
   properties: {
     aspectRatio: { type: "string", pattern: RATIO, description: "Width:height, such as 16:9 or 2:3.", examples: ["16:9"] },
-    cycle: { type: "integer", minimum: imageCycleMin, maximum: imageCycleMax, description: "Seconds each still stays on screen. The ballot swaps to the next uploaded image after this many seconds when an option has more than one.", default: imageCycleMin },
+    cycle: { type: "integer", minimum: imageCycleMin, maximum: imageCycleMax, description: "Seconds each still stays on screen. The ballot crossfades to the next uploaded image after this many seconds when an option has more than one.", default: imageCycleDefault },
   },
 };
 

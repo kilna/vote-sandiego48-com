@@ -48,7 +48,7 @@ describe("admin api contract", () => {
     const cycle = validateObject(pollWrite, { ...examples.pollCreate, imageConfig: { aspectRatio: "16:9", cycle: true } }, "create");
     expect(cycle.ok).toBe(false);
     const timed = validateObject(pollWrite, { slug: "best-film", title: "Best Film", imageConfig: { aspectRatio: "16:9" } }, "create");
-    expect(timed.ok && timed.value.imageConfig).toEqual({ aspectRatio: "16:9", cycle: 1 });
+    expect(timed.ok && timed.value.imageConfig).toEqual({ aspectRatio: "16:9", cycle: 2 });
     const count = validateObject(voteCodeGenerate, { count: 0 }, "create");
     expect(count.ok).toBe(false);
     const voting = validateObject(screeningPatch, { voting: "paused" }, "patch");
@@ -71,11 +71,12 @@ describe("admin api contract", () => {
   });
 
   it("reads seconds per image and ignores stored still counts", () => {
-    expect(imageCycleSeconds(true)).toBe(1);
-    expect(imageCycleSeconds(0)).toBe(1);
-    expect(parseImageConfig(JSON.stringify({ aspectRatio: "2:3", min: 1, max: 4, cycle: true }))).toEqual({ aspectRatio: "2:3", cycle: 1 });
+    expect(imageCycleSeconds(true)).toBe(2);
+    expect(imageCycleSeconds(0)).toBe(2);
+    expect(imageCycleSeconds(1)).toBe(1);
+    expect(parseImageConfig(JSON.stringify({ aspectRatio: "2:3", min: 1, max: 4, cycle: true }))).toEqual({ aspectRatio: "2:3", cycle: 2 });
     expect(parseImageConfig(JSON.stringify({ aspectRatio: "16:9", cycle: 5 }))).toEqual({ aspectRatio: "16:9", cycle: 5 });
-    expect(parseImageConfig("{}")).toEqual({ aspectRatio: "16:9", cycle: 1 });
+    expect(parseImageConfig("{}")).toEqual({ aspectRatio: "16:9", cycle: 2 });
   });
 
   it("keeps presenter fields in the OpenAPI schemas", () => {

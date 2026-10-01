@@ -17,7 +17,7 @@ The home page posts the ticket code to `POST /api/enter`. A recognized unused co
 
 `POST /api/vote` accepts a ballot only when the code is unused, voting is open for that screening, and every poll's selection count is inside its minimum and maximum. It then writes the votes and marks the code used in one batch. A screening's `voting` value is `scheduled`, `open`, or `closed`. `scheduled` accepts a ballot only while the request time is within `startAt` and `stopAt`. `open` and `closed` start or stop voting immediately. Entering a code does not check that state. The ballot shows whether voting is open and still submits; a closed screening returns 403.
 
-The ballot frames stills with the poll's aspect ratio and shows every image uploaded for an option. An option with more than one still swaps images after `imageConfig.cycle` seconds, which defaults to 1. Uploaded files are not checked against the aspect ratio.
+The ballot frames stills with the poll's aspect ratio and fits each image inside that frame. An option with more than one still crossfades after `imageConfig.cycle` seconds, which defaults to 2. Uploaded files are not checked against the aspect ratio.
 
 The screening `timezone` is a label. The admin form reads times in the browser's timezone and stores UTC instants. The ballot formats those instants in the viewer's timezone.
 
