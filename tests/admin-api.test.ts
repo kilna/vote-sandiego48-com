@@ -3,7 +3,7 @@ import { keyBelongs, safeFilename } from "../functions/admin/images";
 import { imageCycleSeconds, parseImageConfig, presentOption, presentPoll, presentScreening } from "../functions/admin/present";
 import { normalizeCode, randomCode } from "../functions/codes";
 import { adminIndex, adminPath, adminRoutes, examples, matchAdminRoute, openapiDocument, optionWrite, pollPatch, pollWrite, publicIndex, screeningPatch, screeningWrite, validateObject, voteCodeGenerate } from "../functions/api/schema";
-import { votingOpen } from "../functions/voting";
+import { countdownLabel, nextVotingCue, stopInMinutes, votingOpen } from "../functions/voting";
 
 describe("admin api contract", () => {
   it("publishes every admin route in the OpenAPI document", () => {
@@ -51,12 +51,16 @@ describe("admin api contract", () => {
     expect(timed.ok && timed.value.imageConfig).toEqual({ aspectRatio: "16:9", cycle: 2 });
     const count = validateObject(voteCodeGenerate, { count: 0 }, "create");
     expect(count.ok).toBe(false);
-    const voting = validateObject(screeningPatch, { voting: "paused" }, "patch");
+    const voting = validateObject(pollPatch, { voting: "paused" }, "patch");
     expect(voting.ok).toBe(false);
     if (!voting.ok) expect(voting.fields.voting).toMatch(/scheduled/);
-    expect(validateObject(screeningPatch, { voting: "open" }, "patch").ok).toBe(true);
-    const created = validateObject(screeningWrite, examples.screeningCreate, "create");
+    expect(validateObject(pollPatch, { voting: "open" }, "patch").ok).toBe(true);
+    expect(validateObject(screeningPatch, { voting: "open" }, "patch").ok).toBe(false);
+    const created = validateObject(pollWrite, examples.pollCreate, "create");
     expect(created.ok && created.value.voting).toBe("scheduled");
+    const windowOrder = validateObject(pollWrite, { ...examples.pollCreate, startAt: "2026-05-01T23:00:00Z", stopAt: "2026-05-01T18:00:00Z" }, "create");
+    expect(windowOrder.ok).toBe(false);
+    if (!windowOrder.ok) expect(windowOrder.fields.stopAt).toMatch(/after/);
     const pasted = validateObject(voteCodeGenerate, { codes: ["TEST-1001"] }, "create");
     expect(pasted.ok).toBe(false);
   });
@@ -104,6 +108,29 @@ describe("admin api contract", () => {
     for (const key of Object.keys(screening)) expect(schemas.Screening.properties).toHaveProperty(key);
     for (const key of Object.keys(screening.polls[0])) expect(schemas.Poll.properties).toHaveProperty(key);
     for (const key of Object.keys(screening.polls[0].options[0])) expect(schemas.Option.properties).toHaveProperty(key);
+  });
+
+  it("stops a poll in a number of minutes and counts down only near the boundary", () => {
+    const now = Date.parse("2026-05-01T20:00:00Z");
+    const kept = stopInMinutes("2026-05-01T18:00:00Z", 5, now);
+    expect(kept.voting).toBe("scheduled");
+    expect(Date.parse(kept.stopAt) - now).toBe(5 * 60 * 1000);
+    expect(Date.parse(kept.startAt)).toBe(Date.parse("2026-05-01T18:00:00Z"));
+    const opened = stopInMinutes("2026-05-01T21:00:00Z", 10, now);
+    expect(Date.parse(opened.startAt)).toBe(now);
+    expect(Date.parse(opened.stopAt) - now).toBe(10 * 60 * 1000);
+    const polls = [
+      { title: "Best Film", voting: "scheduled", startAt: "2026-05-01T20:00:00Z", stopAt: "2026-05-01T21:00:00Z" },
+      { title: "Audience", voting: "scheduled", startAt: "2026-05-01T20:00:00Z", stopAt: "2026-05-01T21:00:00Z" },
+    ];
+    expect(nextVotingCue(polls, Date.parse("2026-05-01T19:50:00Z"))).toBeNull();
+    const starting = nextVotingCue(polls, Date.parse("2026-05-01T19:56:00Z"));
+    expect(starting?.kind).toBe("start");
+    expect(starting && countdownLabel(starting, 2)).toBe("Voting starts in");
+    expect(nextVotingCue(polls, Date.parse("2026-05-01T20:56:00Z"))?.kind).toBe("end");
+    expect(nextVotingCue([{ ...polls[0], voting: "open" }], Date.parse("2026-05-01T20:56:00Z"))).toBeNull();
+    expect(nextVotingCue([{ ...polls[0], voting: "closed" }], Date.parse("2026-05-01T19:56:00Z"))).toBeNull();
+    expect(countdownLabel({ at: now, kind: "end", titles: ["Best Film"] }, 2)).toBe("Best Film voting ends in");
   });
 
   it("opens voting on a manual start and closes it on a manual stop", () => {

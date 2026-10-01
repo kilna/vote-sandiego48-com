@@ -23,6 +23,9 @@ export type PollRow = {
   max_selections: number;
   image_config: string;
   sort_order: number;
+  voting?: string | null;
+  start_at?: string | null;
+  stop_at?: string | null;
 };
 
 export type OptionRow = {
@@ -81,6 +84,8 @@ export function presentOption(row: OptionRow) {
 export function presentPoll(screeningSlug: string, row: PollRow, options: ReturnType<typeof presentOption>[]) {
   const slug = encodeURIComponent(screeningSlug);
   const pollSlug = encodeURIComponent(row.slug);
+  const startAt = row.start_at || "";
+  const stopAt = row.stop_at || "";
   return {
     id: row.id,
     slug: row.slug,
@@ -90,6 +95,10 @@ export function presentPoll(screeningSlug: string, row: PollRow, options: Return
     maxSelections: row.max_selections,
     imageConfig: parseImageConfig(row.image_config),
     sortOrder: row.sort_order,
+    startAt,
+    stopAt,
+    voting: votingMode(row.voting),
+    votingOpen: Boolean(startAt && stopAt && votingOpen(row.voting, startAt, stopAt)),
     options,
     links: {
       self: `/api/admin/screenings/${slug}/polls/${pollSlug}`,
@@ -108,8 +117,6 @@ export function presentScreeningSummary(row: ScreeningRow) {
     timezone: row.timezone,
     startAt: row.start_at,
     stopAt: row.stop_at,
-    voting: votingMode(row.voting),
-    votingOpen: votingOpen(row.voting, row.start_at, row.stop_at),
     bannerImageKey: row.banner_image_key,
     bannerImage: row.banner_image_key ? assetUrl(row.banner_image_key) : null,
     links: {

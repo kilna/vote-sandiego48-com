@@ -1,7 +1,11 @@
+import { renderSVG } from "uqr";
+import { stopInMinutes } from "../functions/voting";
+import { voteCodeUrl } from "./vote-link";
+
 type ImageConfig = { aspectRatio: string; cycle?: number };
 type Option = { id: string; title: string; description: string | null; imageKeys: string[]; images: string[]; sortOrder: number };
-type Poll = { id: string; slug: string; title: string; instructions: string | null; minSelections: number; maxSelections: number; imageConfig: ImageConfig; sortOrder: number; options: Option[] };
 type Voting = "scheduled" | "open" | "closed";
+type Poll = { id: string; slug: string; title: string; instructions: string | null; minSelections: number; maxSelections: number; imageConfig: ImageConfig; sortOrder: number; startAt: string; stopAt: string; voting: Voting; votingOpen: boolean; options: Option[] };
 type Screening = {
   id: string;
   slug: string;
@@ -10,8 +14,6 @@ type Screening = {
   timezone: string;
   startAt: string;
   stopAt: string;
-  voting: Voting;
-  votingOpen: boolean;
   bannerImageKey: string | null;
   bannerImage: string | null;
   polls: Poll[];
@@ -160,7 +162,7 @@ async function listScreen(gen: number) {
 function summaryCard(item: Summary) {
   const href = `/admin/screenings/${encodeURIComponent(item.slug)}`;
   const when = `${new Date(item.startAt).toLocaleString()} – ${new Date(item.stopAt).toLocaleString()}`;
-  return `<article class="editor"><h2><a href="${href}">${esc(item.title)}</a></h2><p>${esc(item.slug)}${item.venue ? ` · ${esc(item.venue)}` : ""}</p><p>${esc(when)}</p><p class="window ${item.votingOpen ? "open" : "closed"}">${esc(votingStatus(item))}</p><div class="admin-actions"><a class="button secondary" href="${href}/results">Results</a><a class="button secondary" href="${href}">Edit</a><button class="button danger" type="button" data-delete-screening="${esc(item.slug)}">Delete</button></div></article>`;
+  return `<article class="editor"><h2><a href="${href}">${esc(item.title)}</a></h2><p>${esc(item.slug)}${item.venue ? ` · ${esc(item.venue)}` : ""}</p><p>${esc(when)}</p><div class="admin-actions"><a class="button secondary" href="${href}/results">Results</a><a class="button secondary" href="${href}">Edit</a><button class="button danger" type="button" data-delete-screening="${esc(item.slug)}">Delete</button></div></article>`;
 }
 
 async function removeScreening(slug: string) {
@@ -204,36 +206,35 @@ function votingStatus(item: { voting: Voting; votingOpen: boolean }) {
   return `${state} · following the schedule`;
 }
 
-function votingControl(screening: Screening) {
-  const detail = screening.voting === "open"
-    ? "Ballots are accepted until you stop voting or return to the schedule."
-    : screening.voting === "closed"
-      ? "Ballots are rejected until you start voting or return to the schedule."
-      : "Ballots are accepted only between the scheduled open and close times.";
-  const button = (mode: Voting, label: string, className: string) => `<button class="button ${className}" type="button" data-voting="${mode}" aria-pressed="${screening.voting === mode}">${label}</button>`;
-  return `<section class="editor" id="voting-control"><h2>Voting</h2><p class="window ${screening.votingOpen ? "open" : "closed"}">${esc(votingStatus(screening))}</p><p>${detail}</p><div class="admin-actions">${button("open", "Start voting", "primary")}${button("closed", "Stop voting", "danger")}${button("scheduled", "Follow schedule", "secondary")}</div></section>`;
+function votingDetail(item: { voting: Voting }) {
+  if (item.voting === "open") return "Ballots are accepted until you stop voting or return to the schedule.";
+  if (item.voting === "closed") return "Ballots are rejected until you start voting or return to the schedule.";
+  return "Ballots are accepted only between this poll's open and close times.";
 }
 
-function bindVoting(screening: Screening) {
-  document.querySelectorAll<HTMLButtonElement>("[data-voting]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const voting = button.dataset.voting as Voting;
-      if (voting === screening.voting) return;
-      void setVoting(screening.slug, voting);
-    });
-  });
+function pollVoting(poll: Poll) {
+  const button = (mode: Voting, label: string, className: string) => `<button class="button ${className}" type="button" data-voting="${mode}" aria-pressed="${poll.voting === mode}">${label}</button>`;
+  return `<section class="poll-voting"><p class="window ${poll.votingOpen ? "open" : "closed"}">${esc(votingStatus(poll))}</p><p class="help">${esc(votingDetail(poll))}</p><div class="admin-actions">${button("open", "Start voting", "primary")}${button("closed", "Stop voting", "danger")}${button("scheduled", "Follow schedule", "secondary")}</div><div class="stop-in"><label>Minutes<input type="number" min="1" max="240" value="5" data-stop-minutes></label><button class="button secondary" type="button" data-stop-in>Stop voting in 5 minutes</button></div></section>`;
 }
 
-async function setVoting(slug: string, voting: Voting) {
+async function setPollVoting(screeningSlug: string, poll: Poll, voting: Voting) {
   try {
-    await api(`/api/admin/screenings/${encodeURIComponent(slug)}`, { method: "PATCH", body: JSON.stringify({ voting }) });
-    note(voting === "open" ? "Voting started." : voting === "closed" ? "Voting stopped." : "Voting follows the schedule.");
+    await api(`/api/admin/screenings/${encodeURIComponent(screeningSlug)}/polls/${encodeURIComponent(poll.slug)}`, { method: "PATCH", body: JSON.stringify({ voting }) });
+    note(voting === "open" ? `${poll.title} is open.` : voting === "closed" ? `${poll.title} is closed.` : `${poll.title} follows its schedule.`);
+    await render();
+  } catch (err) { fail(err); }
+}
+
+async function stopPoll(screeningSlug: string, poll: Poll, minutes: number) {
+  try {
+    await api(`/api/admin/screenings/${encodeURIComponent(screeningSlug)}/polls/${encodeURIComponent(poll.slug)}`, { method: "PATCH", body: JSON.stringify(stopInMinutes(poll.startAt, minutes)) });
+    note(`${poll.title} stops in ${minutes} ${minutes === 1 ? "minute" : "minutes"}.`);
     await render();
   } catch (err) { fail(err); }
 }
 
 function screeningFields(screening: Screening | null) {
-  return `<div class="field-row"><label>Slug<input name="slug" required maxlength="64" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" value="${esc(screening?.slug || "")}" /></label><label>Title<input name="title" required maxlength="200" value="${esc(screening?.title || "")}" /></label></div><label>Venue<input name="venue" maxlength="200" value="${esc(screening?.venue || "")}" /></label><label>Timezone<input name="timezone" maxlength="64" value="${esc(screening?.timezone || "America/Los_Angeles")}" /></label><div class="field-row"><label>Voting opens<input name="startAt" type="datetime-local" required value="${screening ? toLocalInput(screening.startAt) : ""}" /></label><label>Voting closes<input name="stopAt" type="datetime-local" required value="${screening ? toLocalInput(screening.stopAt) : ""}" /></label></div><p class="help">Times are read in your current timezone and stored as an exact instant. Start voting and Stop voting override these times until you choose Follow schedule. Changing the slug changes the public ballot URL.</p>`;
+  return `<div class="field-row"><label>Slug<input name="slug" required maxlength="64" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" value="${esc(screening?.slug || "")}" /></label><label>Title<input name="title" required maxlength="200" value="${esc(screening?.title || "")}" /></label></div><label>Venue<input name="venue" maxlength="200" value="${esc(screening?.venue || "")}" /></label><label>Timezone<input name="timezone" maxlength="64" value="${esc(screening?.timezone || "America/Los_Angeles")}" /></label><div class="field-row"><label>Starts<input name="startAt" type="datetime-local" required value="${screening ? toLocalInput(screening.startAt) : ""}" /></label><label>Ends<input name="stopAt" type="datetime-local" required value="${screening ? toLocalInput(screening.stopAt) : ""}" /></label></div><p class="help">Times are read in your current timezone and stored as an exact instant. A new poll copies them, then keeps its own open and close times. Changing the slug changes the public ballot URL.</p>`;
 }
 
 function bindScreeningForm(existing: Screening | null) {
@@ -270,7 +271,6 @@ async function editScreen(gen: number, slug: string) {
   ]);
   if (gen !== generation) return;
   paint(shell(screening.title, editBody(screening, counts)));
-  bindVoting(screening);
   bindScreeningForm(screening);
   bindBanner(screening);
   bindDeleteScreening(screening);
@@ -286,28 +286,27 @@ async function editScreen(gen: number, slug: string) {
 
 function editBody(screening: Screening, counts: CodeList) {
   const hasPolls = screening.polls.length > 0;
-  const polls = hasPolls ? screening.polls.map((poll) => pollBlock(poll)).join("") : "<p>No polls yet.</p>";
+  const polls = hasPolls ? screening.polls.map((poll) => pollBlock(screening, poll)).join("") : "<p>No polls yet.</p>";
   return `<p><a href="${esc(screening.links.ballot)}">Ballot page</a> · <a href="/api/screenings/${encodeURIComponent(screening.slug)}">Public JSON</a></p>
-    ${votingControl(screening)}
     <form id="screening-form" class="editor"><h2>Screening</h2>${screeningFields(screening)}<div class="admin-actions"><button class="button primary" type="submit">Save screening</button><button class="button danger" type="button" id="delete-screening">Delete screening</button></div></form>
-    <section class="editor"><h2>Banner</h2>${screening.bannerImage ? `<img class="banner-preview" alt="" src="${esc(screening.bannerImage)}">` : "<p>No banner yet.</p>"}<label>Image file<input id="banner-file" type="file" accept="${imageAccept}"></label><div class="admin-actions"><button class="button secondary" type="button" id="upload-banner">Upload banner</button>${screening.bannerImageKey ? `<button class="button danger" type="button" id="clear-banner">Remove banner</button>` : ""}</div><p class="help">Filenames use letters, numbers, dots, hyphens, and underscores. Uploading the same name replaces that file.</p></section>
+    <section class="editor" id="banner-section"><h2>Banner</h2>${screening.bannerImage ? `<img class="banner-preview" alt="" src="${esc(screening.bannerImage)}">` : "<p>No banner yet.</p>"}<label>Image file<input id="banner-file" type="file" accept="${imageAccept}"></label><div class="admin-actions"><button class="button secondary" type="button" id="upload-banner">Upload banner</button>${screening.bannerImageKey ? `<button class="button danger" type="button" id="clear-banner">Remove banner</button>` : ""}</div><p class="help">Filenames use letters, numbers, dots, hyphens, and underscores. Uploading the same name replaces that file.</p></section>
     <h2 class="section-title">Polls</h2>${polls}
     ${hasPolls ? revealButton("new-poll", "Add poll") : ""}
-    ${newPollForm(!hasPolls)}
-    <section class="editor"><h2>Vote codes</h2><p>${counts.total} total · ${counts.unused} unused · ${counts.used} used</p><p class="help">Generate the codes that go on the tickets, then download the file. Each code works once. The file lists every code and whether it has already been used. Typing ignores spaces and hyphens.</p>${counts.unlisted ? `<p class="help">${counts.unlisted} older ${counts.unlisted === 1 ? "code was" : "codes were"} saved before downloads existed. ${counts.unlisted === 1 ? "It still works" : "They still work"} and ${counts.unlisted === 1 ? "is" : "are"} not in the file.</p>` : ""}<form id="codes-form"><label class="codes-count">How many<input name="count" type="number" min="1" max="500" required></label><div class="admin-actions"><button class="button primary" type="submit">Generate codes</button><button class="button secondary" type="button" id="download-codes">Download codes</button>${counts.unused ? `<button class="button danger" type="button" id="remove-codes">Remove unused codes</button>` : ""}</div></form></section>`;
+    ${newPollForm(screening, !hasPolls)}
+    <section class="editor codes-sheet"><h2 class="print-only">${esc(screening.title)} vote codes</h2><h2>Vote codes</h2><p>${counts.total} total · ${counts.unused} unused · ${counts.used} used</p><p class="help">Each QR code opens vote.sandiego48.com/c/CODE, which enters that code. A code can update any poll that is still open. The download lists every code, whether it has been used, and its URL. Typing ignores spaces and hyphens.</p>${counts.unlisted ? `<p class="help">${counts.unlisted} older ${counts.unlisted === 1 ? "code was" : "codes were"} saved before downloads existed. ${counts.unlisted === 1 ? "It still works" : "They still work"} and ${counts.unlisted === 1 ? "is" : "are"} not in the file.</p>` : ""}<form id="codes-form"><label class="codes-count">How many<input name="count" type="number" min="1" max="500" required></label><div class="admin-actions"><button class="button primary" type="submit">Generate codes</button><button class="button secondary" type="button" id="download-codes">Download codes</button>${counts.codes.length ? `<button class="button secondary" type="button" id="print-codes">Print QR codes</button>` : ""}${counts.unused ? `<button class="button danger" type="button" id="remove-codes">Remove unused codes</button>` : ""}</div></form>${codeCards(counts.codes)}</section>`;
 }
 
-function pollBlock(poll: Poll) {
+function pollBlock(screening: Screening, poll: Poll) {
   const hasOptions = poll.options.length > 0;
   const options = poll.options.map((option) => optionForm(poll, option)).join("");
   const empty = hasOptions ? "" : `<p class="help">No options yet.</p>`;
   const formId = `new-option-${poll.id}`;
   const toggle = hasOptions ? revealButton(formId, "Add option") : "";
-  return `<article class="editor poll-block"><form id="poll-${poll.id}" class="poll-form"><h2>${esc(poll.title)}</h2>${pollFields(poll)}<div class="admin-actions"><button class="button primary" type="submit">Save poll</button><button class="button danger" type="button" data-delete-poll="${esc(poll.slug)}">Delete poll</button></div></form><section class="poll-options"><h3>Options</h3>${empty}${options}${toggle}${optionForm(poll, null, !hasOptions)}</section></article>`;
+  return `<article class="editor poll-block"><form id="poll-${poll.id}" class="poll-form"><h2>${esc(poll.title)}</h2>${pollFields(screening, poll)}<div class="admin-actions"><button class="button primary" type="submit">Save poll</button><button class="button danger" type="button" data-delete-poll="${esc(poll.slug)}">Delete poll</button></div></form>${pollVoting(poll)}<section class="poll-options"><h3>Options</h3>${empty}${options}${toggle}${optionForm(poll, null, !hasOptions)}</section></article>`;
 }
 
-function newPollForm(open: boolean) {
-  return `<form id="new-poll" class="editor"${open ? "" : " hidden"}><h2>New poll</h2>${pollFields(null)}<div class="admin-actions"><button class="button primary" type="submit">Add poll</button>${collapseButton(open)}</div></form>`;
+function newPollForm(screening: Screening, open: boolean) {
+  return `<form id="new-poll" class="editor"${open ? "" : " hidden"}><h2>New poll</h2>${pollFields(screening, null)}<div class="admin-actions"><button class="button primary" type="submit">Add poll</button>${collapseButton(open)}</div></form>`;
 }
 
 function revealButton(id: string, label: string) {
@@ -318,9 +317,11 @@ function collapseButton(open: boolean) {
   return open ? "" : `<button class="button secondary" type="button" data-collapse>Cancel</button>`;
 }
 
-function pollFields(poll: Poll | null) {
+function pollFields(screening: Screening, poll: Poll | null) {
   const config = poll?.imageConfig;
-  return `<div class="field-row"><label>Slug<input name="slug" required maxlength="64" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" value="${esc(poll?.slug || "")}"></label><label>Title<input name="title" required maxlength="200" value="${esc(poll?.title || "")}"></label></div><label>Instructions<textarea name="instructions" maxlength="2000" rows="3">${esc(poll?.instructions || "")}</textarea></label><div class="field-row"><label>Minimum selections<input name="minSelections" type="number" min="0" max="100" required value="${poll?.minSelections ?? 1}"></label><label>Maximum selections<input name="maxSelections" type="number" min="0" max="100" required value="${poll?.maxSelections ?? 1}"></label><label>Sort order<input name="sortOrder" type="number" min="0" value="${poll?.sortOrder ?? ""}"></label></div><div class="field-row"><label>Aspect ratio<input name="aspectRatio" required value="${esc(config?.aspectRatio || "16:9")}"></label><label>Seconds per image<input name="cycle" type="number" min="1" max="60" required value="${config?.cycle ?? 2}"></label></div>`;
+  const start = toLocalInput(poll?.startAt || screening.startAt);
+  const stop = toLocalInput(poll?.stopAt || screening.stopAt);
+  return `<div class="field-row"><label>Slug<input name="slug" required maxlength="64" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" value="${esc(poll?.slug || "")}"></label><label>Title<input name="title" required maxlength="200" value="${esc(poll?.title || "")}"></label></div><label>Instructions<textarea name="instructions" maxlength="2000" rows="3">${esc(poll?.instructions || "")}</textarea></label><div class="field-row"><label>Minimum selections<input name="minSelections" type="number" min="0" max="100" required value="${poll?.minSelections ?? 1}"></label><label>Maximum selections<input name="maxSelections" type="number" min="0" max="100" required value="${poll?.maxSelections ?? 1}"></label><label>Sort order<input name="sortOrder" type="number" min="0" value="${poll?.sortOrder ?? ""}"></label></div><div class="field-row"><label>Voting opens<input name="startAt" type="datetime-local" required value="${start}"></label><label>Voting closes<input name="stopAt" type="datetime-local" required value="${stop}"></label></div><div class="field-row"><label>Aspect ratio<input name="aspectRatio" required value="${esc(config?.aspectRatio || "16:9")}"></label><label>Seconds per image<input name="cycle" type="number" min="1" max="60" required value="${config?.cycle ?? 2}"></label></div><p class="help">This poll opens and closes on its own schedule. Start, stop, and the minute timer take effect immediately and do not wait for Save poll.</p>`;
 }
 
 function optionForm(poll: Poll, option: Option | null, open = true) {
@@ -408,6 +409,23 @@ function bindPoll(screening: Screening, poll: Poll) {
       await render();
     } catch (err) { fail(err); }
   });
+  const block = form.closest(".poll-block");
+  block?.querySelectorAll<HTMLButtonElement>("[data-voting]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const voting = button.dataset.voting as Voting;
+      if (voting === poll.voting) return;
+      void setPollVoting(screening.slug, poll, voting);
+    });
+  });
+  const minutesInput = block?.querySelector<HTMLInputElement>("[data-stop-minutes]");
+  const stopButton = block?.querySelector<HTMLButtonElement>("[data-stop-in]");
+  const labelMinutes = () => {
+    const minutes = clampMinutes(minutesInput?.value || "");
+    if (stopButton) stopButton.textContent = `Stop voting in ${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
+    return minutes;
+  };
+  minutesInput?.addEventListener("input", labelMinutes);
+  stopButton?.addEventListener("click", () => void stopPoll(screening.slug, poll, labelMinutes()));
 }
 
 function bindNewPoll(screening: Screening) {
@@ -434,6 +452,8 @@ function pollBody(form: HTMLFormElement) {
       aspectRatio: String(data.aspectRatio || ""),
       cycle: Number(data.cycle),
     },
+    startAt: fromLocalInput(String(data.startAt || "")),
+    stopAt: fromLocalInput(String(data.stopAt || "")),
   };
   if (String(data.sortOrder || "").trim() !== "") body.sortOrder = Number(data.sortOrder);
   return body;
@@ -512,14 +532,29 @@ function bindCodes(screening: Screening) {
     } catch (err) { fail(err); }
   });
   document.querySelector("#download-codes")!.addEventListener("click", () => void downloadCodes(screening));
+  document.querySelector("#print-codes")?.addEventListener("click", () => window.print());
   document.querySelector("#remove-codes")?.addEventListener("click", () => void removeUnusedCodes(screening));
+}
+
+function clampMinutes(value: string) {
+  const minutes = Math.round(Number(value));
+  if (!Number.isFinite(minutes)) return 5;
+  return Math.min(240, Math.max(1, minutes));
+}
+
+function codeCards(codes: VoteCode[]) {
+  if (!codes.length) return "";
+  return `<div class="code-grid">${codes.map((item) => {
+    const svg = renderSVG(voteCodeUrl(item.code), { ecc: "M", border: 2, pixelSize: 6 });
+    return `<figure class="code-card">${svg}<figcaption><strong>${esc(item.code)}</strong><span>${item.used ? "Used" : "Ready"}</span></figcaption></figure>`;
+  }).join("")}</div>`;
 }
 
 async function downloadCodes(screening: Screening) {
   try {
     const list = await api<CodeList>(`/api/admin/screenings/${encodeURIComponent(screening.slug)}/codes`);
     if (!list.codes.length) { showMessage("There are no codes to download.", true); return; }
-    const lines = ["code,used", ...list.codes.map((item) => `${item.code},${item.used ? "yes" : "no"}`)];
+    const lines = ["code,used,url", ...list.codes.map((item) => `${item.code},${item.used ? "yes" : "no"},${voteCodeUrl(item.code)}`)];
     const url = URL.createObjectURL(new Blob([`${lines.join("\n")}\n`], { type: "text/csv;charset=utf-8" }));
     const link = document.createElement("a");
     link.href = url;

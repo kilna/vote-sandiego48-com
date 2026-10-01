@@ -139,7 +139,7 @@ async function createScreening(request: Request, env: Env) {
   const value = parsed.value;
   const id = crypto.randomUUID();
   try {
-    await env.DB.prepare("INSERT INTO screenings (id, slug, title, venue, banner_image_key, timezone, start_at, stop_at, voting) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)").bind(id, value.slug, value.title, blankToNull(value.venue), value.timezone, value.startAt, value.stopAt, value.voting).run();
+    await env.DB.prepare("INSERT INTO screenings (id, slug, title, venue, banner_image_key, timezone, start_at, stop_at, voting) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)").bind(id, value.slug, value.title, blankToNull(value.venue), value.timezone, value.startAt, value.stopAt, "scheduled").run();
   } catch (err) {
     if (isUnique(err)) return error(409, "A screening with this slug already exists.", { field: "slug" });
     throw err;
@@ -166,7 +166,7 @@ async function updateScreening(request: Request, env: Env, slug: string) {
     const key = String(value.bannerImageKey);
     if (!keyBelongs(found.row.id, key) || !await env.MEDIA.get(key)) return invalid({ bannerImageKey: "Upload the banner to this screening first and use the returned key." });
   }
-  const columns: Record<string, string> = { slug: "slug", title: "title", venue: "venue", timezone: "timezone", startAt: "start_at", stopAt: "stop_at", voting: "voting", bannerImageKey: "banner_image_key" };
+  const columns: Record<string, string> = { slug: "slug", title: "title", venue: "venue", timezone: "timezone", startAt: "start_at", stopAt: "stop_at", bannerImageKey: "banner_image_key" };
   const keys = Object.keys(value).filter((key) => columns[key]);
   const stored = keys.map((key) => key === "venue" ? blankToNull(value[key]) : value[key]);
   try {
@@ -225,9 +225,13 @@ async function createPoll(request: Request, env: Env, slug: string) {
   if (!parsed.ok) return invalid(parsed.fields);
   const value = parsed.value;
   const sortOrder = typeof value.sortOrder === "number" ? value.sortOrder : await nextSort(env, "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM polls WHERE screening_id = ?", found.row.id);
+  const startAt = typeof value.startAt === "string" ? value.startAt : found.row.start_at;
+  const stopAt = typeof value.stopAt === "string" ? value.stopAt : found.row.stop_at;
+  if (Date.parse(stopAt) <= Date.parse(startAt)) return invalid({ stopAt: "Must be after startAt." });
+  const voting = typeof value.voting === "string" ? value.voting : "scheduled";
   const id = crypto.randomUUID();
   try {
-    await env.DB.prepare("INSERT INTO polls (id, screening_id, slug, title, instructions, min_selections, max_selections, image_config, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(id, found.row.id, value.slug, value.title, blankToNull(value.instructions), value.minSelections, value.maxSelections, JSON.stringify(value.imageConfig), sortOrder).run();
+    await env.DB.prepare("INSERT INTO polls (id, screening_id, slug, title, instructions, min_selections, max_selections, image_config, sort_order, voting, start_at, stop_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(id, found.row.id, value.slug, value.title, blankToNull(value.instructions), value.minSelections, value.maxSelections, JSON.stringify(value.imageConfig), sortOrder, voting, startAt, stopAt).run();
   } catch (err) {
     if (isUnique(err)) return error(409, "A poll with this slug already exists on the screening.", { field: "slug" });
     throw err;
@@ -258,7 +262,10 @@ async function updatePoll(request: Request, env: Env, slug: string, pollSlug: st
   const min = typeof value.minSelections === "number" ? value.minSelections : poll.row.min_selections;
   const max = typeof value.maxSelections === "number" ? value.maxSelections : poll.row.max_selections;
   if (max < min) return invalid({ maxSelections: "Must be greater than or equal to minSelections." });
-  const columns: Record<string, string> = { slug: "slug", title: "title", instructions: "instructions", minSelections: "min_selections", maxSelections: "max_selections", imageConfig: "image_config", sortOrder: "sort_order" };
+  const startAt = typeof value.startAt === "string" ? value.startAt : poll.row.start_at || "";
+  const stopAt = typeof value.stopAt === "string" ? value.stopAt : poll.row.stop_at || "";
+  if (Date.parse(stopAt) <= Date.parse(startAt)) return invalid({ stopAt: "Must be after startAt." });
+  const columns: Record<string, string> = { slug: "slug", title: "title", instructions: "instructions", minSelections: "min_selections", maxSelections: "max_selections", imageConfig: "image_config", sortOrder: "sort_order", voting: "voting", startAt: "start_at", stopAt: "stop_at" };
   const keys = Object.keys(value).filter((key) => columns[key]);
   const stored = keys.map((key) => {
     if (key === "instructions") return blankToNull(value[key]);

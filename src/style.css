@@ -194,9 +194,12 @@ main.home .gate {
   gap: 0.75rem;
   padding: 0;
   color: var(--48-navy);
-  font-size: clamp(1.45rem, 3vw, 1.9rem);
   font-weight: 800;
   line-height: 1.05;
+}
+
+.poll-title {
+  font-size: clamp(2.15rem, 5.5vw, 3.15rem);
   text-shadow: var(--halo);
 }
 
@@ -321,19 +324,27 @@ main.home .gate {
   content: "✓";
   position: absolute;
   z-index: 3;
-  top: 0.5rem;
-  right: 0.5rem;
+  top: 0.55rem;
+  right: 0.55rem;
   display: grid;
-  width: 1.8rem;
-  height: 1.8rem;
+  width: 3.6rem;
+  height: 3.6rem;
   place-items: center;
   border-radius: 999px;
   background: var(--48-purple);
   color: var(--48-white);
+  font-size: 2.4rem;
   font-weight: 800;
   line-height: 1;
   pointer-events: none;
-  box-shadow: 0 0 0 0.14rem var(--48-white);
+  box-shadow: 0 0 0 0.18rem var(--48-white);
+}
+
+.poll.is-closed .option {
+  filter: grayscale(1);
+  opacity: 0.55;
+  cursor: default;
+  pointer-events: none;
 }
 
 .option:has(input:focus-visible) {
@@ -704,7 +715,151 @@ input:not([type="radio"]):not([type="checkbox"]):focus-visible {
 @media (prefers-reduced-motion: reduce) {
   .option,
   .button,
-  .option-image .still { transition: none; }
+  .option-image .still,
+  .selection-toast { transition: none; }
   .button:hover,
   .option:has(input:checked) { transform: none; }
+}
+
+@font-face {
+  font-family: "DSEG7Classic";
+  src: url("/fonts/DSEG7ClassicMini-BoldItalic.ttf") format("truetype");
+  font-weight: bold;
+  font-style: italic;
+  font-display: swap;
+}
+
+.poll .countdown {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: flex-start;
+  gap: 0.35rem;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0.7rem 0 0.2rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 0.45rem;
+  background: radial-gradient(ellipse at bottom, var(--48-purple-dark) 0%, var(--48-black) 100%);
+  color: var(--48-orange);
+  font-weight: 600;
+  text-align: left;
+  font-size: clamp(1.2rem, 3.5vw, 1.7rem);
+  --clock-color: var(--48-gold);
+}
+
+.poll .countdown[hidden] { display: none; }
+
+.clock {
+  font-family: "DSEG7Classic", monospace;
+  font-size: 0.85em;
+  transform: translateY(0.1em);
+  display: inline-block;
+  position: relative;
+}
+
+.clock .on {
+  color: var(--clock-color);
+  position: relative;
+  z-index: 1;
+  text-shadow: 0 0 0.25em var(--clock-color, #c00000);
+}
+
+.clock .off {
+  position: absolute;
+  left: 0;
+  top: 0;
+  color: color-mix(in srgb, var(--clock-color, #c00000) 40%, #000000);
+  opacity: 0.4;
+  pointer-events: none;
+  letter-spacing: inherit;
+  font-size: inherit;
+  font-family: inherit;
+  font-weight: inherit;
+  font-style: inherit;
+  line-height: inherit;
+}
+
+.selection-toast {
+  position: fixed;
+  z-index: 20;
+  left: 50%;
+  bottom: 1.25rem;
+  max-width: min(28rem, calc(100% - 1.5rem));
+  margin: 0;
+  padding: 0.7rem 1rem;
+  border: 0.2rem solid var(--48-orange);
+  border-radius: 0.6rem;
+  background: var(--48-navy);
+  color: var(--48-white);
+  font-weight: 800;
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  translate: -50% 0.4rem;
+  transition: opacity 180ms ease, translate 180ms ease;
+}
+
+.selection-toast.is-on {
+  opacity: 1;
+  translate: -50% 0;
+}
+
+.code-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.code-card {
+  display: grid;
+  justify-items: center;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0.7rem;
+  border-radius: 0.5rem;
+  background: var(--48-white);
+  color: var(--48-navy);
+}
+
+.code-card svg { width: 100%; height: auto; }
+
+.code-card strong {
+  font-size: 1rem;
+  letter-spacing: 0.04em;
+}
+
+.code-card span {
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.stop-in {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.75rem;
+}
+
+.stop-in label { max-width: 8rem; }
+
+.print-only { display: none; }
+
+@media print {
+  body { background: white; }
+  .masthead,
+  .intro,
+  #screening-form,
+  #banner-section,
+  .section-title,
+  .poll-block,
+  #new-poll,
+  .add-toggle-row,
+  #codes-form,
+  .codes-sheet > p,
+  .codes-sheet > h2:not(.print-only) { display: none !important; }
+  .print-only { display: block; }
+  .code-grid { display: grid !important; }
+  .code-card { break-inside: avoid; }
 }

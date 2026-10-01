@@ -5,17 +5,17 @@ Cloudflare Pages + Functions voting site for `vote.sandiego48.com`.
 ## Architecture
 
 - Static frontend: Vite + TypeScript, deployed as Cloudflare Pages assets.
-- Runtime data: Cloudflare D1 (screenings, polls, options, one-use vote codes, votes).
+- Runtime data: Cloudflare D1 (screenings, polls, options, vote codes, votes).
 - Images: Cloudflare R2. Each poll stores an `imageConfig` for aspect ratio and how many seconds each still stays on screen.
 - Admin writes go through `/api/admin`. `GET /api` links to `GET /api/openapi.json`. `GET /api/admin` lists `workflows.createScreening`.
 - `/admin` edits those same resources in the browser.
-- A vote code belongs to one screening and is unique across the site. One submission covers every poll in that screening.
+- A vote code belongs to one screening and is unique across the site. One submission covers every open poll in that screening, and the same code can update a poll until that poll closes. `/c/<code>` enters the code the same way the home page does.
 
 ## How voting works
 
-The home page posts the ticket code to `POST /api/enter`. A recognized unused code is stored in `sessionStorage` and the browser opens `/s/<slug>`. Opening `/s/<slug>` without that session entry returns to the home page. `GET /api/screenings/<slug>` and `GET /api/assets/...` do not check the code.
+The home page, or `/c/<code>`, posts the ticket code to `POST /api/enter`. A recognized code is stored in `sessionStorage` and the browser opens `/s/<slug>`. Opening `/s/<slug>` without that session entry returns to the home page. `GET /api/screenings/<slug>` and `GET /api/assets/...` do not check the code. A code that already voted can enter again; the response includes its current selections.
 
-`POST /api/vote` accepts a ballot only when the code is unused, voting is open for that screening, and every poll's selection count is inside its minimum and maximum. It then writes the votes and marks the code used in one batch. A screening's `voting` value is `scheduled`, `open`, or `closed`. `scheduled` accepts a ballot only while the request time is within `startAt` and `stopAt`. `open` and `closed` start or stop voting immediately. Entering a code does not check that state. The ballot shows whether voting is open and still submits; a closed screening returns 403.
+`POST /api/vote` accepts each poll on its own. A poll's `voting` value is `scheduled`, `open`, or `closed`. `scheduled` accepts a selection only while the request time is within that poll's `startAt` and `stopAt`. `open` and `closed` start or stop that poll immediately. Closed polls stay grayed out and keep their stored selections. Open polls replace that code's previous selections when the count is inside the minimum and maximum. A minimum of 0 may be left blank. The code is marked used on the first accepted ballot. Entering a code does not check that state. If every poll is closed, the vote returns 403.
 
 The ballot frames stills with the poll's aspect ratio and fits each image inside that frame. An option with more than one still crossfades after `imageConfig.cycle` seconds, which defaults to 2. Uploaded files are not checked against the aspect ratio.
 
@@ -43,13 +43,13 @@ People administer the site through Cloudflare Access. Agents send `CF-Access-Cli
 
 Images are jpeg, png, webp, gif, or svg, up to 8 MiB. Uploading the same filename replaces the object. Asset responses are cached for one hour. Removing an image from an option, or deleting a poll or option, leaves the stored object. Deleting a screening deletes its stored images.
 
-`/admin` edits screenings, polls, options, the banner, and stills after Cloudflare Access signs the browser in. Each screening on that page links to its results, which total selections per option. Its vote-code section generates codes and downloads them as a CSV.
+`/admin` edits screenings, polls, options, the banner, and stills after Cloudflare Access signs the browser in. Each poll has its own start, stop, schedule, and a control to stop voting in a number of minutes. Each screening on that page links to its results, which total selections per option. Its vote-code section generates codes, shows a QR code for `https://vote.sandiego48.com/c/<code>`, and downloads them as a CSV.
 
 ## Admin access
 
 Cloudflare Access protects admin URLs. People use the existing email allow policy. An agent uses a service token named `vote-sandiego48-admin-agent`, sent as `CF-Access-Client-Id` and `CF-Access-Client-Secret`.
 
-Unauthenticated requests to `https://vote.sandiego48.com/api/admin` are challenged by Access. Public voting (`/`, `/s/*`, `/api/enter`, `/api/vote`, `/api/screenings/*`, `/api/assets/*`) stays outside Access.
+Unauthenticated requests to `https://vote.sandiego48.com/api/admin` are challenged by Access. Public voting (`/`, `/s/*`, `/c/*`, `/api/enter`, `/api/vote`, `/api/screenings/*`, `/api/assets/*`) stays outside Access.
 
 `AGENTS.md` has the setup steps for creating that service token. Leave Pages secret `ADMIN_TOKEN` unset. The Wrangler token used here cannot read the Zero Trust organization, so the service token was not created from this session.
 
@@ -57,7 +57,6 @@ Unauthenticated requests to `https://vote.sandiego48.com/api/admin` are challeng
 
 - The Access service token named in `AGENTS.md`, if it is not already on the Access application. The admin Functions already verify the Access JWT.
 - Atomic vote-code consumption. Overlapping submissions of the same code can both record votes.
-- A blank poll when `minSelections` is 0. That request fails, and the ballot uses a required radio whenever `maxSelections` is 1.
 - Checks that uploads match `imageConfig.aspectRatio`.
 - Rate limiting on public vote submission.
 - Tests against a local D1 and R2, including concurrent use of one code.
