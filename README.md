@@ -43,7 +43,7 @@ People administer the site through Cloudflare Access. Agents send `CF-Access-Cli
 
 Images are jpeg, png, webp, gif, or svg, up to 8 MiB. Uploading the same filename replaces the object. Asset responses are cached for one hour. Removing an image from an option, or deleting a poll or option, leaves the stored object. Deleting a screening deletes its stored images.
 
-`/admin` edits screenings, polls, options, the banner, and stills after Cloudflare Access signs the browser in. Each poll has its own start, stop, schedule, and a control to stop voting in a number of minutes. Each screening on that page links to its results, which total selections per option. Its vote-code section generates codes, shows a QR code for `https://vote.sandiego48.com/c/<code>`, and downloads them as a CSV.
+`/admin` edits screenings, polls, options, the banner, and stills after Cloudflare Access signs the browser in. Each poll has its own start, stop, schedule, and a control to stop voting in a number of minutes. Each screening on that page links to its results, which total selections per option. Its vote-code section generates codes and downloads them as a CSV that includes each code's URL, `https://vote.sandiego48.com/c/<code>`.
 
 ## Admin access
 

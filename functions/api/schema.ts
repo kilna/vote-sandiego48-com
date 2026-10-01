@@ -166,7 +166,7 @@ export const optionPatch: ObjectSchema = {
 export const voteCodeGenerate: ObjectSchema = {
   description: "How many vote codes to create. The server chooses the codes. Each code is stored so it can be downloaded, and hashed for voting.",
   fields: {
-    count: { type: "integer", required: true, description: "Number of new codes, from 1 to 500. Each code is eight letters or digits grouped as XXXX-XXXX. The alphabet omits 0, O, 1, I, and L. Spaces and hyphens are ignored when a voter types the code.", example: 25, minimum: 1, maximum: 500 },
+    count: { type: "integer", required: true, description: "Number of new codes, from 1 to 500. Each code is five letters or digits. The alphabet omits 0, O, 1, I, and L. Spaces and hyphens are ignored when a voter types the code.", example: 25, minimum: 1, maximum: 500 },
   },
 };
 
@@ -571,7 +571,7 @@ export function openapiDocument() {
           type: "object",
           required: ["code", "used"],
           properties: {
-            code: { type: "string", description: "Code to print on the ticket, grouped as XXXX-XXXX.", examples: ["K7NP-4QWM"] },
+            code: { type: "string", description: "Five-character code to print on the ticket.", examples: ["K7NP4"] },
             used: { type: "boolean", description: "True after this code has saved a pick. The code can still change polls that are open." },
           },
         },

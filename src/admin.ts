@@ -1,4 +1,3 @@
-import { renderSVG } from "uqr";
 import { stopInMinutes } from "../functions/voting";
 import { voteCodeUrl } from "./vote-link";
 
@@ -293,7 +292,7 @@ function editBody(screening: Screening, counts: CodeList) {
     <h2 class="section-title">Polls</h2>${polls}
     ${hasPolls ? revealButton("new-poll", "Add poll") : ""}
     ${newPollForm(screening, !hasPolls)}
-    <section class="editor codes-sheet"><h2 class="print-only">${esc(screening.title)} vote codes</h2><h2>Vote codes</h2><p>${counts.total} total · ${counts.unused} unused · ${counts.used} used</p><p class="help">Each QR code opens vote.sandiego48.com/c/CODE, which enters that code. A code can update any poll that is still open. The download lists every code, whether it has been used, and its URL. Typing ignores spaces and hyphens.</p>${counts.unlisted ? `<p class="help">${counts.unlisted} older ${counts.unlisted === 1 ? "code was" : "codes were"} saved before downloads existed. ${counts.unlisted === 1 ? "It still works" : "They still work"} and ${counts.unlisted === 1 ? "is" : "are"} not in the file.</p>` : ""}<form id="codes-form"><label class="codes-count">How many<input name="count" type="number" min="1" max="500" required></label><div class="admin-actions"><button class="button primary" type="submit">Generate codes</button><button class="button secondary" type="button" id="download-codes">Download codes</button>${counts.codes.length ? `<button class="button secondary" type="button" id="print-codes">Print QR codes</button>` : ""}${counts.unused ? `<button class="button danger" type="button" id="remove-codes">Remove unused codes</button>` : ""}</div></form>${codeCards(counts.codes)}</section>`;
+    <section class="editor codes-sheet"><h2>Vote codes</h2><p>${counts.total} total · ${counts.unused} unused · ${counts.used} used</p><p class="help">Each code's URL is https://vote.sandiego48.com/c/CODE, which enters that code. A code can update any poll that is still open. The download lists every code, whether it has been used, and its URL. Typing ignores spaces and hyphens.</p>${counts.unlisted ? `<p class="help">${counts.unlisted} older ${counts.unlisted === 1 ? "code was" : "codes were"} saved before downloads existed. ${counts.unlisted === 1 ? "It still works" : "They still work"} and ${counts.unlisted === 1 ? "is" : "are"} not in the file.</p>` : ""}<form id="codes-form"><label class="codes-count">How many<input name="count" type="number" min="1" max="500" required></label><div class="admin-actions"><button class="button primary" type="submit">Generate codes</button><button class="button secondary" type="button" id="download-codes">Download codes</button>${counts.unused ? `<button class="button danger" type="button" id="remove-codes">Remove unused codes</button>` : ""}</div></form></section>`;
 }
 
 function pollBlock(screening: Screening, poll: Poll) {
@@ -532,7 +531,6 @@ function bindCodes(screening: Screening) {
     } catch (err) { fail(err); }
   });
   document.querySelector("#download-codes")!.addEventListener("click", () => void downloadCodes(screening));
-  document.querySelector("#print-codes")?.addEventListener("click", () => window.print());
   document.querySelector("#remove-codes")?.addEventListener("click", () => void removeUnusedCodes(screening));
 }
 
@@ -540,14 +538,6 @@ function clampMinutes(value: string) {
   const minutes = Math.round(Number(value));
   if (!Number.isFinite(minutes)) return 5;
   return Math.min(240, Math.max(1, minutes));
-}
-
-function codeCards(codes: VoteCode[]) {
-  if (!codes.length) return "";
-  return `<div class="code-grid">${codes.map((item) => {
-    const svg = renderSVG(voteCodeUrl(item.code), { ecc: "M", border: 2, pixelSize: 6 });
-    return `<figure class="code-card">${svg}<figcaption><strong>${esc(item.code)}</strong><span>${item.used ? "Used" : "Ready"}</span></figcaption></figure>`;
-  }).join("")}</div>`;
 }
 
 async function downloadCodes(screening: Screening) {

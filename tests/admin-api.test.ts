@@ -157,8 +157,8 @@ describe("admin api contract", () => {
     const codes = new Set<string>();
     for (let index = 0; index < 200; index += 1) codes.add(randomCode());
     expect(codes.size).toBe(200);
-    for (const code of codes) expect(code).toMatch(/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{4}-[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{4}$/);
-    expect(normalizeCode(" k7np-4qwm ")).toBe("K7NP4QWM");
-    expect(normalizeCode("K7NP4QWM")).toBe(normalizeCode("K7NP-4QWM"));
+    for (const code of codes) expect(code).toMatch(/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{5}$/);
+    expect(normalizeCode(" ab234 ")).toBe("AB234");
+    expect(normalizeCode("AB234")).toBe(normalizeCode("AB-234"));
   });
 });
