@@ -309,7 +309,6 @@ main.home .gate {
   color: var(--48-navy-nearblack);
   font-size: 0.92rem;
   line-height: 1.3;
-  white-space: pre-line;
 }
 
 .option:has(input:checked) {
