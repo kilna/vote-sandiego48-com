@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { keyBelongs, safeFilename } from "../functions/admin/images";
-import { presentOption, presentPoll, presentScreening } from "../functions/admin/present";
+import { imageCycleSeconds, parseImageConfig, presentOption, presentPoll, presentScreening } from "../functions/admin/present";
 import { normalizeCode, randomCode } from "../functions/codes";
 import { adminIndex, adminPath, adminRoutes, examples, matchAdminRoute, openapiDocument, optionWrite, pollPatch, pollWrite, publicIndex, screeningPatch, screeningWrite, validateObject, voteCodeGenerate } from "../functions/api/schema";
+import { votingOpen } from "../functions/voting";
 
 describe("admin api contract", () => {
   it("publishes every admin route in the OpenAPI document", () => {
@@ -41,10 +42,21 @@ describe("admin api contract", () => {
     expect(empty.ok).toBe(false);
     const selections = validateObject(pollPatch, { minSelections: 3, maxSelections: 1 }, "patch");
     expect(selections.ok).toBe(false);
-    const stills = validateObject(pollWrite, { ...examples.pollCreate, imageConfig: { aspectRatio: "16:9", min: 3, max: 1 } }, "create");
+    const stills = validateObject(pollWrite, { ...examples.pollCreate, imageConfig: { aspectRatio: "16:9", min: 1, max: 2 } }, "create");
     expect(stills.ok).toBe(false);
+    if (!stills.ok) expect(stills.fields.imageConfig).toMatch(/min/);
+    const cycle = validateObject(pollWrite, { ...examples.pollCreate, imageConfig: { aspectRatio: "16:9", cycle: true } }, "create");
+    expect(cycle.ok).toBe(false);
+    const timed = validateObject(pollWrite, { slug: "best-film", title: "Best Film", imageConfig: { aspectRatio: "16:9" } }, "create");
+    expect(timed.ok && timed.value.imageConfig).toEqual({ aspectRatio: "16:9", cycle: 1 });
     const count = validateObject(voteCodeGenerate, { count: 0 }, "create");
     expect(count.ok).toBe(false);
+    const voting = validateObject(screeningPatch, { voting: "paused" }, "patch");
+    expect(voting.ok).toBe(false);
+    if (!voting.ok) expect(voting.fields.voting).toMatch(/scheduled/);
+    expect(validateObject(screeningPatch, { voting: "open" }, "patch").ok).toBe(true);
+    const created = validateObject(screeningWrite, examples.screeningCreate, "create");
+    expect(created.ok && created.value.voting).toBe("scheduled");
     const pasted = validateObject(voteCodeGenerate, { codes: ["TEST-1001"] }, "create");
     expect(pasted.ok).toBe(false);
   });
@@ -56,6 +68,14 @@ describe("admin api contract", () => {
     expect(wrong.ok).toBe(false);
     if (!wrong.ok) expect(wrong.status).toBe(405);
     expect(matchAdminRoute("GET", ["missing"]).ok).toBe(false);
+  });
+
+  it("reads seconds per image and ignores stored still counts", () => {
+    expect(imageCycleSeconds(true)).toBe(1);
+    expect(imageCycleSeconds(0)).toBe(1);
+    expect(parseImageConfig(JSON.stringify({ aspectRatio: "2:3", min: 1, max: 4, cycle: true }))).toEqual({ aspectRatio: "2:3", cycle: 1 });
+    expect(parseImageConfig(JSON.stringify({ aspectRatio: "16:9", cycle: 5 }))).toEqual({ aspectRatio: "16:9", cycle: 5 });
+    expect(parseImageConfig("{}")).toEqual({ aspectRatio: "16:9", cycle: 1 });
   });
 
   it("keeps presenter fields in the OpenAPI schemas", () => {
@@ -83,6 +103,18 @@ describe("admin api contract", () => {
     for (const key of Object.keys(screening)) expect(schemas.Screening.properties).toHaveProperty(key);
     for (const key of Object.keys(screening.polls[0])) expect(schemas.Poll.properties).toHaveProperty(key);
     for (const key of Object.keys(screening.polls[0].options[0])) expect(schemas.Option.properties).toHaveProperty(key);
+  });
+
+  it("opens voting on a manual start and closes it on a manual stop", () => {
+    const start = "2026-05-01T18:00:00-07:00";
+    const stop = "2026-05-01T23:00:00-07:00";
+    const during = Date.parse("2026-05-01T20:00:00-07:00");
+    const before = Date.parse("2026-05-01T12:00:00-07:00");
+    expect(votingOpen("scheduled", start, stop, during)).toBe(true);
+    expect(votingOpen("scheduled", start, stop, before)).toBe(false);
+    expect(votingOpen("open", start, stop, before)).toBe(true);
+    expect(votingOpen("closed", start, stop, during)).toBe(false);
+    expect(votingOpen(undefined, start, stop, during)).toBe(true);
   });
 
   it("rejects traversal in image keys and keeps only a safe basename", () => {

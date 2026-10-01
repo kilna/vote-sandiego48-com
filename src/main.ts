@@ -1,8 +1,8 @@
 import "./style.css";
 import { startAdmin } from "./admin";
 
-type Poll = { id: string; title: string; instructions: string; minSelections: number; maxSelections: number; imageConfig?: { aspectRatio?: string }; options: { id: string; title: string; description?: string; images: string[] }[] };
-type Screening = { id: string; slug: string; title: string; venue?: string; bannerImage?: string; startAt: string; stopAt: string; polls: Poll[] };
+type Poll = { id: string; title: string; instructions: string; minSelections: number; maxSelections: number; imageConfig?: { aspectRatio?: string; cycle?: number }; options: { id: string; title: string; description?: string; images: string[] }[] };
+type Screening = { id: string; slug: string; title: string; venue?: string; bannerImage?: string; startAt: string; stopAt: string; voting?: "scheduled" | "open" | "closed"; votingOpen?: boolean; polls: Poll[] };
 const app = document.querySelector<HTMLDivElement>("#app")!;
 const slug = location.pathname.match(/\/s\/([^/]+)/)?.[1] || "";
 const entryKey = "sd48-vote-entry";
@@ -15,9 +15,9 @@ function unavailable(message: string) { app.innerHTML = `${brandHeader()}<main c
 let current: Screening;
 let activeCode = "";
 const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c] || c));
-const isOpen = (s: Screening) => { const n = Date.now(); return n >= Date.parse(s.startAt) && n <= Date.parse(s.stopAt); };
+const isOpen = (s: Screening) => typeof s.votingOpen === "boolean" ? s.votingOpen : Date.now() >= Date.parse(s.startAt) && Date.now() <= Date.parse(s.stopAt);
 function frameRatio(value?: string) { const match = /^(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)$/.exec(value || ""); return match ? `${match[1]} / ${match[2]}` : "16 / 9"; }
-function windowText(s: Screening) { const start = new Date(s.startAt), stop = new Date(s.stopAt); const full: Intl.DateTimeFormatOptions = { dateStyle: "medium", timeStyle: "short" }; const startText = start.toLocaleString([], full); const stopText = start.toDateString() === stop.toDateString() ? stop.toLocaleTimeString([], { timeStyle: "short" }) : stop.toLocaleString([], full); return `${startText}–${stopText}`; }
+function windowText(s: Screening) { const start = new Date(s.startAt), stop = new Date(s.stopAt); const full: Intl.DateTimeFormatOptions = { dateStyle: "medium", timeStyle: "short" }; const startText = start.toLocaleString([], full); const stopText = start.toDateString() === stop.toDateString() ? stop.toLocaleTimeString([], { timeStyle: "short" }) : stop.toLocaleString([], full); const range = `${startText}–${stopText}`; if (s.voting === "open") return `Opened manually · ${range}`; if (s.voting === "closed") return `Closed manually · ${range}`; return range; }
 function render(s: Screening) {
   current = s;
   const hero = s.bannerImage ? `<div class="screening-banner" style="background-image:url('${esc(s.bannerImage)}')"></div>` : "";
@@ -26,12 +26,14 @@ function render(s: Screening) {
   document.querySelector<HTMLFormElement>("#vote-form")!.addEventListener("submit", submitVotes);
   document.querySelectorAll<HTMLElement>("[data-cycle]").forEach(startCycle);
 }
+function cycleSeconds(value: unknown) { const seconds = typeof value === "number" ? value : Number(value); return Number.isInteger(seconds) && seconds >= 1 && seconds <= 60 ? seconds : 1; }
 function renderPoll(p: Poll) {
   const ratio = frameRatio(p.imageConfig?.aspectRatio);
-  const options = p.options.map(o => { const type = p.maxSelections === 1 ? "radio" : "checkbox"; const image = o.images.length ? ` data-cycle='${esc(JSON.stringify(o.images))}' style="aspect-ratio:${ratio};background-image:url('${esc(o.images[0])}')"` : ` style="aspect-ratio:${ratio}"`; return `<label class="option"><input type="${type}" name="poll-${p.id}" value="${esc(o.id)}" ${type === "radio" ? "required" : ""}/><span class="option-image"${image}></span><span class="option-copy"><strong>${esc(o.title)}</strong>${o.description ? `<small>${esc(o.description)}</small>` : ""}</span></label>`; }).join("");
+  const seconds = cycleSeconds(p.imageConfig?.cycle);
+  const options = p.options.map(o => { const type = p.maxSelections === 1 ? "radio" : "checkbox"; const image = o.images.length ? ` data-cycle='${esc(JSON.stringify(o.images))}' data-seconds="${seconds}" style="aspect-ratio:${ratio};background-image:url('${esc(o.images[0])}')"` : ` style="aspect-ratio:${ratio}"`; return `<label class="option"><input type="${type}" name="poll-${p.id}" value="${esc(o.id)}" ${type === "radio" ? "required" : ""}/><span class="option-image"${image}></span><span class="option-copy"><strong>${esc(o.title)}</strong>${o.description ? `<small>${esc(o.description)}</small>` : ""}</span></label>`; }).join("");
   return `<fieldset class="poll"><legend><span>${esc(p.title)}</span><span class="rule">${p.minSelections === p.maxSelections ? `Select ${p.minSelections}` : `Select ${p.minSelections}–${p.maxSelections}`}</span></legend>${p.instructions ? `<p class="instructions">${esc(p.instructions)}</p>` : ""}<div class="options">${options}</div></fieldset>`;
 }
-function startCycle(el: HTMLElement) { const imgs = JSON.parse(el.dataset.cycle || "[]") as string[]; let i = 0; if (imgs.length > 1) setInterval(() => { i = (i + 1) % imgs.length; el.style.backgroundImage = `url('${imgs[i]}')`; }, 4000); }
+function startCycle(el: HTMLElement) { const imgs = JSON.parse(el.dataset.cycle || "[]") as string[]; let i = 0; if (imgs.length > 1) setInterval(() => { i = (i + 1) % imgs.length; el.style.backgroundImage = `url('${imgs[i]}')`; }, cycleSeconds(el.dataset.seconds) * 1000); }
 async function submitVotes(e: SubmitEvent) {
   e.preventDefault(); const form = e.currentTarget as HTMLFormElement; const button = form.querySelector<HTMLButtonElement>("button")!; const msg = form.querySelector<HTMLElement>(".message")!;
   const selections: Record<string, string[]> = {};

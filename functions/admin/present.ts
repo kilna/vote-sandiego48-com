@@ -1,4 +1,5 @@
 import { assetUrl } from "../assets";
+import { votingMode, votingOpen } from "../voting";
 
 export type ScreeningRow = {
   id: string;
@@ -9,6 +10,7 @@ export type ScreeningRow = {
   timezone: string;
   start_at: string;
   stop_at: string;
+  voting?: string | null;
 };
 
 export type PollRow = {
@@ -32,7 +34,14 @@ export type OptionRow = {
   sort_order: number;
 };
 
-export type ImageConfig = { aspectRatio: string; min: number; max: number; cycle?: boolean };
+export type ImageConfig = { aspectRatio: string; cycle: number };
+
+export const imageCycleMin = 1;
+export const imageCycleMax = 60;
+
+export function imageCycleSeconds(value: unknown) {
+  return typeof value === "number" && Number.isInteger(value) && value >= imageCycleMin && value <= imageCycleMax ? value : imageCycleMin;
+}
 
 export function parseKeys(raw: string | null) {
   try {
@@ -47,17 +56,12 @@ export function parseImageConfig(raw: string | null): ImageConfig {
   try {
     const value = JSON.parse(raw || "{}") as Partial<ImageConfig> | null;
     if (value && typeof value === "object" && typeof value.aspectRatio === "string") {
-      return {
-        aspectRatio: value.aspectRatio,
-        min: Number(value.min ?? 1),
-        max: Number(value.max ?? 1),
-        cycle: Boolean(value.cycle),
-      };
+      return { aspectRatio: value.aspectRatio, cycle: imageCycleSeconds(value.cycle) };
     }
   } catch {
     /* Fall through to the ballot default. */
   }
-  return { aspectRatio: "16:9", min: 1, max: 1, cycle: false };
+  return { aspectRatio: "16:9", cycle: imageCycleMin };
 }
 
 export function presentOption(row: OptionRow) {
@@ -103,6 +107,8 @@ export function presentScreeningSummary(row: ScreeningRow) {
     timezone: row.timezone,
     startAt: row.start_at,
     stopAt: row.stop_at,
+    voting: votingMode(row.voting),
+    votingOpen: votingOpen(row.voting, row.start_at, row.stop_at),
     bannerImageKey: row.banner_image_key,
     bannerImage: row.banner_image_key ? assetUrl(row.banner_image_key) : null,
     links: {

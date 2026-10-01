@@ -5,7 +5,7 @@ export interface Env {
   ACCESS_AUD?: string;
   ACCESS_DEV_BYPASS?: string;
 }
-export interface PollImageConfig { aspectRatio: string; min: number; max: number; cycle?: boolean; }
+export interface PollImageConfig { aspectRatio: string; cycle: number; }
 export interface PollOption { id: string; title: string; description?: string; images: string[]; }
 export interface Poll { id: string; slug: string; title: string; instructions: string; minSelections: number; maxSelections: number; imageConfig: PollImageConfig; options: PollOption[]; }
-export interface Screening { id: string; slug: string; title: string; venue?: string; bannerImage?: string; timezone: string; startAt: string; stopAt: string; polls: Poll[]; }
+export interface Screening { id: string; slug: string; title: string; venue?: string; bannerImage?: string; timezone: string; startAt: string; stopAt: string; voting: "scheduled" | "open" | "closed"; votingOpen: boolean; polls: Poll[]; }

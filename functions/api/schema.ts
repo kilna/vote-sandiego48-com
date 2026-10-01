@@ -1,3 +1,5 @@
+import { imageCycleMax, imageCycleMin } from "../admin/present";
+
 const SLUG = "^[a-z0-9]+(?:-[a-z0-9]+)*$";
 const SLUG_MESSAGE = "Use lowercase letters, numbers, and single hyphens.";
 const TIMESTAMP = "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})$";
@@ -15,6 +17,7 @@ type StringField = {
   minLength?: number;
   maxLength?: number;
   format?: "date-time";
+  enum?: readonly string[];
   default?: string | null;
 };
 
@@ -54,7 +57,7 @@ type ImageConfigField = {
   type: "imageConfig";
   required?: boolean;
   description: string;
-  default?: { aspectRatio: string; min: number; max: number; cycle: boolean };
+  default?: { aspectRatio: string; cycle: number };
 };
 
 type Field = StringField | IntegerField | BooleanField | StringArrayField | ImageConfigField;
@@ -69,10 +72,18 @@ export type Validation =
   | { ok: true; value: Record<string, unknown> }
   | { ok: false; fields: Record<string, string> };
 
-const imageConfigDescription = "How the ballot frames stills. aspectRatio is width:height, such as 16:9 for film or 2:3 for a poster, and the public ballot uses it as the frame. min and max are intended still counts. cycle is stored and returned. The public ballot does not read cycle: an option with more than one still swaps images every four seconds either way. The API does not measure image files or reject an option whose still count is outside min and max.";
+const imageConfigDescription = "How the ballot frames and swaps stills. aspectRatio is width:height, such as 16:9 for film or 2:3 for a poster, and the public ballot uses it as the frame. cycle is how many seconds each still stays on screen before the next one. It is an integer from 1 to 60 and defaults to 1. An option shows every image uploaded for it. The API does not measure those files or check them against the aspect ratio.";
+
+const votingField: StringField = {
+  type: "string",
+  description: "scheduled opens and closes at startAt and stopAt. open accepts ballots until you change it. closed rejects ballots until you change it.",
+  example: "scheduled",
+  enum: ["scheduled", "open", "closed"],
+  default: "scheduled",
+};
 
 export const screeningWrite: ObjectSchema = {
-  description: "Fields required to create a screening. Voting opens and closes at the exact instants in startAt and stopAt.",
+  description: "Fields required to create a screening. Voting follows startAt and stopAt unless voting is open or closed.",
   fields: {
     slug: { type: "string", required: true, description: "Public id used in /s/{slug} and /api/screenings/{slug}.", example: "spring-screening", pattern: SLUG, patternMessage: SLUG_MESSAGE, maxLength: 64 },
     title: { type: "string", required: true, description: "Name shown on the ballot.", example: "Spring Screening", minLength: 1, maxLength: 200 },
@@ -80,6 +91,7 @@ export const screeningWrite: ObjectSchema = {
     timezone: { type: "string", description: "IANA timezone label stored with the screening. The voting window uses startAt and stopAt, which already include an offset.", example: "America/Los_Angeles", minLength: 1, maxLength: 64, default: "America/Los_Angeles" },
     startAt: { type: "string", required: true, description: TIMESTAMP_MESSAGE, example: "2026-05-01T18:00:00-07:00", pattern: TIMESTAMP, patternMessage: TIMESTAMP_MESSAGE, format: "date-time" },
     stopAt: { type: "string", required: true, description: TIMESTAMP_MESSAGE, example: "2026-05-01T23:00:00-07:00", pattern: TIMESTAMP, patternMessage: TIMESTAMP_MESSAGE, format: "date-time" },
+    voting: votingField,
   },
   refine: (value) => dateOrder(value),
 };
@@ -93,6 +105,7 @@ export const screeningPatch: ObjectSchema = {
     timezone: screeningWrite.fields.timezone,
     startAt: screeningWrite.fields.startAt,
     stopAt: screeningWrite.fields.stopAt,
+    voting: votingField,
     bannerImageKey: { type: "string", nullable: true, description: "Key returned by uploadScreeningImage, or null to remove the banner. The key must be {screeningId}/{filename} for this screening.", example: null },
   },
   refine: (value) => dateOrder(value),
@@ -106,7 +119,7 @@ export const pollWrite: ObjectSchema = {
     instructions: { type: "string", nullable: true, description: "Optional text under the heading. Send null to clear it.", example: "One vote for the film you want to win.", maxLength: 2000, default: null },
     minSelections: { type: "integer", description: "Fewest options a voter must choose. Defaults to 1. When omitted and maxSelections is set, maxSelections must still be at least this value.", example: 1, minimum: 0, maximum: 100, default: 1 },
     maxSelections: { type: "integer", description: "Most options a voter may choose. Defaults to minSelections.", example: 1, minimum: 0, maximum: 100 },
-    imageConfig: { type: "imageConfig", description: imageConfigDescription, default: { aspectRatio: "16:9", min: 1, max: 1, cycle: false } },
+    imageConfig: { type: "imageConfig", description: imageConfigDescription, default: { aspectRatio: "16:9", cycle: imageCycleMin } },
     sortOrder: { type: "integer", description: "Position among this screening's polls. Lower numbers come first. Defaults to the next position.", example: 0, minimum: 0, maximum: 10000 },
   },
   refine: (value, mode) => selectionOrder(value, mode),
@@ -168,7 +181,7 @@ export const examples = {
     instructions: "One vote for the film you want to win.",
     minSelections: 1,
     maxSelections: 1,
-    imageConfig: { aspectRatio: "16:9", min: 1, max: 2, cycle: true },
+    imageConfig: { aspectRatio: "16:9", cycle: 2 },
     sortOrder: 0,
   },
   optionCreate: {
@@ -230,6 +243,7 @@ function validateString(field: StringField, input: unknown): { value: unknown } 
   if (field.nullable && value === "") return { value: null };
   if (field.minLength !== undefined && value.length < field.minLength) return { error: "Required." };
   if (field.maxLength !== undefined && value.length > field.maxLength) return { error: `Use at most ${field.maxLength} characters.` };
+  if (field.enum && !field.enum.includes(value)) return { error: `Use ${field.enum.join(", ")}.` };
   if (field.pattern && !new RegExp(field.pattern).test(value)) return { error: field.patternMessage || "Does not match the required pattern." };
   if (field.format === "date-time" && Number.isNaN(Date.parse(value))) return { error: field.patternMessage || TIMESTAMP_MESSAGE };
   return { value };
@@ -258,16 +272,13 @@ function validateStringArray(field: StringArrayField, input: unknown): { value: 
 }
 
 function validateImageConfig(input: unknown): { value: unknown } | { error: string } {
-  if (input === null || typeof input !== "object" || Array.isArray(input)) return { error: "Send an object with aspectRatio, min, and max." };
+  if (input === null || typeof input !== "object" || Array.isArray(input)) return { error: "Send an object with aspectRatio and cycle." };
   const source = input as Record<string, unknown>;
-  const unknown = Object.keys(source).filter((key) => !["aspectRatio", "min", "max", "cycle"].includes(key));
+  const unknown = Object.keys(source).filter((key) => !["aspectRatio", "cycle"].includes(key));
   if (unknown.length) return { error: `Unknown field ${unknown[0]}.` };
   if (typeof source.aspectRatio !== "string" || !new RegExp(RATIO).test(source.aspectRatio.trim())) return { error: "aspectRatio must look like 16:9 or 2:3." };
-  if (typeof source.min !== "number" || !Number.isInteger(source.min) || source.min < 0) return { error: "min must be an integer of at least 0." };
-  if (typeof source.max !== "number" || !Number.isInteger(source.max) || source.max < 0) return { error: "max must be an integer of at least 0." };
-  if (source.max < source.min) return { error: "max must be greater than or equal to min." };
-  if (source.cycle !== undefined && typeof source.cycle !== "boolean") return { error: "cycle must be true or false." };
-  return { value: { aspectRatio: source.aspectRatio.trim(), min: source.min, max: source.max, cycle: source.cycle === true } };
+  if (source.cycle !== undefined && (typeof source.cycle !== "number" || !Number.isInteger(source.cycle) || source.cycle < imageCycleMin || source.cycle > imageCycleMax)) return { error: `cycle must be an integer from ${imageCycleMin} to ${imageCycleMax}.` };
+  return { value: { aspectRatio: source.aspectRatio.trim(), cycle: source.cycle === undefined ? imageCycleMin : source.cycle } };
 }
 
 export type AdminRoute = {
@@ -293,11 +304,12 @@ const requestSchemas = {
 
 export const adminRoutes: AdminRoute[] = [
   { method: "GET", parts: [], operationId: "getAdminIndex", summary: "Discover admin operations", description: "Start here after authenticating. Follow workflows.createScreening in order to publish a ballot without guessing field names.", response: "AdminIndex", status: 200 },
-  { method: "GET", parts: ["screenings"], operationId: "listScreenings", summary: "List screenings", description: "Each item links to the screening, its polls, image upload, and vote codes.", response: "ScreeningList", status: 200 },
+  { method: "GET", parts: ["screenings"], operationId: "listScreenings", summary: "List screenings", description: "Each item links to the screening, its polls, image upload, vote codes, and results.", response: "ScreeningList", status: 200 },
   { method: "POST", parts: ["screenings"], operationId: "createScreening", summary: "Create a screening", description: "Create the screening, then upload images, add polls and options, and generate vote codes. A duplicate slug returns 409.", body: "ScreeningWrite", response: "Screening", status: 201 },
   { method: "GET", parts: ["screenings", ":slug"], operationId: "getScreening", summary: "Read a screening", description: "Returns the screening with its polls and options.", response: "Screening", status: 200 },
-  { method: "PATCH", parts: ["screenings", ":slug"], operationId: "updateScreening", summary: "Update a screening", description: "Changes only the fields you send. Set bannerImageKey to a key from uploadScreeningImage, or null to remove the banner.", body: "ScreeningPatch", response: "Screening", status: 200 },
+  { method: "PATCH", parts: ["screenings", ":slug"], operationId: "updateScreening", summary: "Update a screening", description: "Changes only the fields you send. Set voting to open or closed to start or stop voting immediately, or scheduled to follow startAt and stopAt. Set bannerImageKey to a key from uploadScreeningImage, or null to remove the banner.", body: "ScreeningPatch", response: "Screening", status: 200 },
   { method: "DELETE", parts: ["screenings", ":slug"], operationId: "deleteScreening", summary: "Delete a screening", description: "Deletes the screening, its polls, options, vote codes, and votes, then deletes images stored for that screening.", response: "Deleted", status: 200 },
+  { method: "GET", parts: ["screenings", ":slug", "results"], operationId: "getScreeningResults", summary: "Read vote results", description: "Totals selections for each option. Polls stay in ballot order. Options within a poll are ordered by vote count, then ballot order. ballots is the number of distinct vote codes that recorded a selection. A poll's votes can exceed ballots when that poll allows more than one selection. Options with no votes are included.", response: "ScreeningResults", status: 200 },
   { method: "GET", parts: ["screenings", ":slug", "polls"], operationId: "listPolls", summary: "List polls", description: "Polls are ordered by sortOrder, then title. Each poll includes its options.", response: "PollList", status: 200 },
   { method: "POST", parts: ["screenings", ":slug", "polls"], operationId: "createPoll", summary: "Create a poll", description: "Add a poll to a screening. A duplicate poll slug within the screening returns 409.", body: "PollWrite", response: "Poll", status: 201 },
   { method: "GET", parts: ["screenings", ":slug", "polls", ":pollSlug"], operationId: "getPoll", summary: "Read a poll", description: "Returns one poll and its options.", response: "Poll", status: 200 },
@@ -375,7 +387,7 @@ export function adminIndex() {
 
 function fieldSchema(field: Field): Record<string, unknown> {
   if (field.type === "string") {
-    return compact({ type: field.nullable ? ["string", "null"] : "string", description: field.description, pattern: field.pattern, minLength: field.minLength, maxLength: field.maxLength, format: field.format, examples: field.example !== undefined ? [field.example] : undefined });
+    return compact({ type: field.nullable ? ["string", "null"] : "string", description: field.description, enum: field.enum, pattern: field.pattern, minLength: field.minLength, maxLength: field.maxLength, format: field.format, examples: field.example !== undefined ? [field.example] : undefined });
   }
   if (field.type === "integer") return compact({ type: "integer", description: field.description, minimum: field.minimum, maximum: field.maximum, examples: field.example !== undefined ? [field.example] : undefined });
   if (field.type === "boolean") return compact({ type: "boolean", description: field.description, examples: field.example !== undefined ? [field.example] : undefined });
@@ -411,12 +423,10 @@ const imageConfigSchema = {
   type: "object",
   description: imageConfigDescription,
   additionalProperties: false,
-  required: ["aspectRatio", "min", "max"],
+  required: ["aspectRatio"],
   properties: {
     aspectRatio: { type: "string", pattern: RATIO, description: "Width:height, such as 16:9 or 2:3.", examples: ["16:9"] },
-    min: { type: "integer", minimum: 0, description: "Intended minimum number of stills.", examples: [1] },
-    max: { type: "integer", minimum: 0, description: "Intended maximum number of stills.", examples: [2] },
-    cycle: { type: "boolean", description: "Stored on the poll. The public ballot does not read it; more than one still always cycles every four seconds.", default: false },
+    cycle: { type: "integer", minimum: imageCycleMin, maximum: imageCycleMax, description: "Seconds each still stays on screen. The ballot swaps to the next uploaded image after this many seconds when an option has more than one.", default: imageCycleMin },
   },
 };
 
@@ -430,6 +440,11 @@ const errorSchema = {
     fields: { type: "object", additionalProperties: { type: "string" }, description: "Validation messages keyed by request field." },
     conflicts: { type: "array", items: { type: "string" } },
   },
+};
+
+const votingFields = {
+  voting: { type: "string", enum: ["scheduled", "open", "closed"], description: "scheduled follows startAt and stopAt. open accepts ballots until changed. closed rejects ballots until changed." },
+  votingOpen: { type: "boolean", description: "Whether a ballot submitted at this response would be accepted. scheduled compares the server clock with startAt and stopAt." },
 };
 
 export function openapiDocument() {
@@ -446,9 +461,9 @@ export function openapiDocument() {
     requestBody: jsonBody("EnterRequest", false),
   });
   addPath(paths, "/api/vote", "POST", {
-    ...publicOperation("castVote", "Cast a ballot", "One code covers every poll in the screening. selections maps each poll id to chosen option ids. The server checks the voting window and each poll's minimum and maximum, then writes the vote rows and marks the code used in one batch. Overlapping submissions of the same code can both be recorded. Leaving a poll with no selections builds an empty SQL IN list and the request fails, including when minSelections is 0. Errors are a single error string.", "VoteResult", {
+    ...publicOperation("castVote", "Cast a ballot", "One code covers every poll in the screening. selections maps each poll id to chosen option ids. The server accepts the ballot when voting is open, or when voting is scheduled and the request time is within startAt and stopAt. It rejects the ballot when voting is closed. It then checks each poll's minimum and maximum, writes the vote rows, and marks the code used in one batch. Overlapping submissions of the same code can both be recorded. Leaving a poll with no selections builds an empty SQL IN list and the request fails, including when minSelections is 0. Errors are a single error string.", "VoteResult", {
       "400": "screeningId, code, or selections is missing, a poll's selection count is outside its bounds, or an option id is not on that poll.",
-      "403": "The code is not on this screening, or the current time is outside startAt and stopAt.",
+      "403": "The code is not on this screening, voting is closed, or voting is scheduled and the current time is outside startAt and stopAt.",
       "409": "The code was already used.",
     }),
     requestBody: jsonBody("VoteRequest", false),
@@ -496,8 +511,8 @@ export function openapiDocument() {
         AdminIndex: { type: "object", description: "Admin discovery document. workflows.createScreening is the supported order of calls." },
         OpenApiDocument: { type: "object" },
         ScreeningList: { type: "object", required: ["screenings"], properties: { screenings: { type: "array", items: { $ref: "#/components/schemas/ScreeningSummary" } } } },
-        ScreeningSummary: resourceSchema(["id", "slug", "title", "venue", "timezone", "startAt", "stopAt", "bannerImageKey", "bannerImage", "links"]),
-        Screening: resourceSchema(["id", "slug", "title", "venue", "timezone", "startAt", "stopAt", "bannerImageKey", "bannerImage", "polls", "links"], { polls: { type: "array", items: { $ref: "#/components/schemas/Poll" } } }),
+        ScreeningSummary: resourceSchema(["id", "slug", "title", "venue", "timezone", "startAt", "stopAt", "voting", "votingOpen", "bannerImageKey", "bannerImage", "links"], votingFields),
+        Screening: resourceSchema(["id", "slug", "title", "venue", "timezone", "startAt", "stopAt", "voting", "votingOpen", "bannerImageKey", "bannerImage", "polls", "links"], { ...votingFields, polls: { type: "array", items: { $ref: "#/components/schemas/Poll" } } }),
         PollList: { type: "object", required: ["polls"], properties: { polls: { type: "array", items: { $ref: "#/components/schemas/Poll" } } } },
         Poll: resourceSchema(["id", "slug", "title", "instructions", "minSelections", "maxSelections", "imageConfig", "sortOrder", "options", "links"], {
           imageConfig: { $ref: "#/components/schemas/ImageConfig" },
@@ -506,6 +521,36 @@ export function openapiDocument() {
         OptionList: { type: "object", required: ["options"], properties: { options: { type: "array", items: { $ref: "#/components/schemas/Option" } } } },
         Option: resourceSchema(["id", "pollId", "title", "description", "imageKeys", "images", "sortOrder"]),
         ImageCreated: resourceSchema(["key", "contentType", "url", "links"]),
+        ScreeningResults: {
+          type: "object",
+          required: ["slug", "title", "ballots", "polls"],
+          properties: {
+            slug: { type: "string" },
+            title: { type: "string" },
+            ballots: { type: "integer", description: "Distinct vote codes that recorded at least one selection." },
+            polls: { type: "array", items: { $ref: "#/components/schemas/PollResults" } },
+          },
+        },
+        PollResults: {
+          type: "object",
+          required: ["id", "slug", "title", "votes", "options"],
+          properties: {
+            id: { type: "string" },
+            slug: { type: "string" },
+            title: { type: "string" },
+            votes: { type: "integer", description: "Selections recorded in this poll." },
+            options: { type: "array", items: { $ref: "#/components/schemas/OptionResults" } },
+          },
+        },
+        OptionResults: {
+          type: "object",
+          required: ["id", "title", "votes"],
+          properties: {
+            id: { type: "string" },
+            title: { type: "string" },
+            votes: { type: "integer" },
+          },
+        },
         CodeList: {
           type: "object",
           required: ["total", "used", "unused", "unlisted", "codes"],

@@ -1,5 +1,6 @@
 import { hashCode } from "../codes";
 import type { Env } from "../types";
+import { votingOpen } from "../voting";
 export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   const body = await request.json<{ screeningId: string; code: string; selections: Record<string, string[]> }>().catch(() => null);
   if (!body?.screeningId || !body.code || !body.selections) return Response.json({ error: "screeningId, code, and selections are required" }, { status: 400 });
@@ -7,8 +8,8 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   const codeRow = await env.DB.prepare("SELECT * FROM vote_codes WHERE code_hash = ? AND screening_id = ?").bind(codeHash, body.screeningId).first<any>();
   if (!codeRow) return Response.json({ error: "Invalid vote code" }, { status: 403 });
   if (codeRow.used_at) return Response.json({ error: "This vote code has already been used" }, { status: 409 });
-  const screening = await env.DB.prepare("SELECT start_at, stop_at FROM screenings WHERE id = ?").bind(body.screeningId).first<any>();
-  const now = Date.now(); if (!screening || now < Date.parse(screening.start_at) || now > Date.parse(screening.stop_at)) return Response.json({ error: "Voting is not open" }, { status: 403 });
+  const screening = await env.DB.prepare("SELECT start_at, stop_at, voting FROM screenings WHERE id = ?").bind(body.screeningId).first<{ start_at: string; stop_at: string; voting: string }>();
+  if (!screening || !votingOpen(screening.voting, screening.start_at, screening.stop_at)) return Response.json({ error: "Voting is not open" }, { status: 403 });
   const polls = await env.DB.prepare("SELECT * FROM polls WHERE screening_id = ?").bind(body.screeningId).all<any>();
   const statements: D1PreparedStatement[] = [];
   for (const poll of polls.results) {

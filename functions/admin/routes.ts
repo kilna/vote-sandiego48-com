@@ -28,6 +28,7 @@ export async function handleAdmin(request: Request, env: Env, parts: string[]) {
     case "getScreening": return readScreening(env, params.slug);
     case "updateScreening": return updateScreening(request, env, params.slug);
     case "deleteScreening": return deleteScreening(env, params.slug);
+    case "getScreeningResults": return screeningResults(env, params.slug);
     case "listPolls": return listPolls(env, params.slug);
     case "createPoll": return createPoll(request, env, params.slug);
     case "getPoll": return readPoll(env, params.slug, params.pollSlug);
@@ -138,7 +139,7 @@ async function createScreening(request: Request, env: Env) {
   const value = parsed.value;
   const id = crypto.randomUUID();
   try {
-    await env.DB.prepare("INSERT INTO screenings (id, slug, title, venue, banner_image_key, timezone, start_at, stop_at) VALUES (?, ?, ?, ?, NULL, ?, ?, ?)").bind(id, value.slug, value.title, blankToNull(value.venue), value.timezone, value.startAt, value.stopAt).run();
+    await env.DB.prepare("INSERT INTO screenings (id, slug, title, venue, banner_image_key, timezone, start_at, stop_at, voting) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)").bind(id, value.slug, value.title, blankToNull(value.venue), value.timezone, value.startAt, value.stopAt, value.voting).run();
   } catch (err) {
     if (isUnique(err)) return error(409, "A screening with this slug already exists.", { field: "slug" });
     throw err;
@@ -165,7 +166,7 @@ async function updateScreening(request: Request, env: Env, slug: string) {
     const key = String(value.bannerImageKey);
     if (!keyBelongs(found.row.id, key) || !await env.MEDIA.get(key)) return invalid({ bannerImageKey: "Upload the banner to this screening first and use the returned key." });
   }
-  const columns: Record<string, string> = { slug: "slug", title: "title", venue: "venue", timezone: "timezone", startAt: "start_at", stopAt: "stop_at", bannerImageKey: "banner_image_key" };
+  const columns: Record<string, string> = { slug: "slug", title: "title", venue: "venue", timezone: "timezone", startAt: "start_at", stopAt: "stop_at", voting: "voting", bannerImageKey: "banner_image_key" };
   const keys = Object.keys(value).filter((key) => columns[key]);
   const stored = keys.map((key) => key === "venue" ? blankToNull(value[key]) : value[key]);
   try {
@@ -385,6 +386,35 @@ async function uploadImage(request: Request, env: Env, slug: string) {
   const summary = presentScreeningSummary(found.row);
   return json({ key, contentType, url: assetUrl(key), links: { screening: summary.links.self } }, 201);
 }
+
+async function screeningResults(env: Env, slug: string) {
+  const found = await requireScreening(env, slug);
+  if ("response" in found) return found.response;
+  const ballots = await env.DB.prepare("SELECT COUNT(DISTINCT code_hash) AS ballots FROM votes WHERE screening_id = ?").bind(found.row.id).first<{ ballots: number }>();
+  const listed = await env.DB.prepare(`SELECT p.id AS poll_id, p.slug AS poll_slug, p.title AS poll_title,
+      o.id AS option_id, o.title AS option_title, COUNT(v.id) AS votes
+    FROM polls p
+    LEFT JOIN options o ON o.poll_id = p.id
+    LEFT JOIN votes v ON v.option_id = o.id
+    WHERE p.screening_id = ?
+    GROUP BY p.id, p.slug, p.title, p.sort_order, o.id, o.title, o.sort_order
+    ORDER BY p.sort_order, p.title, COUNT(v.id) DESC, o.sort_order, o.title`).bind(found.row.id).all<ResultRow>();
+  const polls: { id: string; slug: string; title: string; votes: number; options: { id: string; title: string; votes: number }[] }[] = [];
+  for (const row of listed.results || []) {
+    let poll = polls.find((item) => item.id === row.poll_id);
+    if (!poll) {
+      poll = { id: row.poll_id, slug: row.poll_slug, title: row.poll_title, votes: 0, options: [] };
+      polls.push(poll);
+    }
+    if (!row.option_id || !row.option_title) continue;
+    const votes = Number(row.votes || 0);
+    poll.votes += votes;
+    poll.options.push({ id: row.option_id, title: row.option_title, votes });
+  }
+  return json({ slug: found.row.slug, title: found.row.title, ballots: Number(ballots?.ballots || 0), polls });
+}
+
+type ResultRow = { poll_id: string; poll_slug: string; poll_title: string; option_id: string | null; option_title: string | null; votes: number };
 
 async function listCodes(env: Env, slug: string) {
   const found = await requireScreening(env, slug);

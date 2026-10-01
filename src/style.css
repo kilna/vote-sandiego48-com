@@ -493,6 +493,13 @@ input:not([type="radio"]):not([type="checkbox"]):focus-visible {
 
 .poll-block { gap: 1.15rem; margin: 1rem 0; }
 
+.add-toggle-row { margin: 0.35rem 0 0.9rem; }
+.poll-options .add-toggle-row { margin: 0; }
+
+.editor[hidden],
+.option-editor[hidden],
+.admin-actions[hidden] { display: none; }
+
 .poll-form, .option-editor { display: grid; gap: 0.85rem; }
 
 .poll-options {
@@ -548,12 +555,6 @@ input:not([type="radio"]):not([type="checkbox"]):focus-visible {
   font-weight: 800;
 }
 
-.editor .check {
-  flex-direction: row;
-  align-items: center;
-  gap: 0.55rem;
-}
-
 .field-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
@@ -580,6 +581,29 @@ input:not([type="radio"]):not([type="checkbox"]):focus-visible {
 
 .codes-count { max-width: 12rem; }
 
+.result-row { display: grid; gap: 0.3rem; }
+
+.result-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: var(--48-navy);
+  font-weight: 800;
+}
+
+.result-track {
+  height: 0.75rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--48-navy-nearwhite);
+}
+
+.result-fill {
+  display: block;
+  height: 100%;
+  background: var(--48-orange);
+}
+
 .help {
   margin: 0;
   color: var(--48-purple);
@@ -604,13 +628,15 @@ input:not([type="radio"]):not([type="checkbox"]):focus-visible {
 .thumbs figure {
   display: grid;
   gap: 0.35rem;
-  width: 8.5rem;
+  width: max-content;
+  max-width: 100%;
   margin: 0;
 }
 
 .thumbs img {
-  width: 100%;
-  height: 6rem;
+  width: min(8.5rem, calc(9rem * var(--frame-w, 16) / var(--frame-h, 9)));
+  height: auto;
+  aspect-ratio: var(--frame-w, 16) / var(--frame-h, 9);
   object-fit: cover;
   background: var(--48-navy-dark);
   border-radius: 0.3rem;
@@ -618,6 +644,7 @@ input:not([type="radio"]):not([type="checkbox"]):focus-visible {
 
 .thumbs button {
   padding: 0.25rem 0.4rem;
+  white-space: nowrap;
   border: 0;
   background: none;
   color: #a32929;
@@ -639,6 +666,15 @@ input:not([type="radio"]):not([type="checkbox"]):focus-visible {
   background: #a32929;
   color: var(--48-white);
 }
+
+.button[aria-pressed="true"] {
+  border-color: var(--48-navy);
+  background: var(--48-navy);
+  color: var(--48-white);
+  cursor: default;
+}
+
+.button[aria-pressed="true"]:hover { transform: none; }
 
 @media (max-width: 600px) {
   h1 { text-align: center; }
