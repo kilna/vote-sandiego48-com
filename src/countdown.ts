@@ -10,14 +10,14 @@ export function clockParts(target: number, now = Date.now()) {
   return { minutes, seconds, elapsed };
 }
 
-export function startClock(element: HTMLElement, target: number) {
+export function startClock(element: HTMLElement, target: number, now = () => Date.now()) {
   const handle = { id: 0 };
   const stop = () => window.clearInterval(handle.id);
   const paint = (minutes: number, seconds: number) => {
     element.innerHTML = formatClock(minutes, seconds);
   };
   const paintRemaining = () => {
-    const parts = clockParts(target);
+    const parts = clockParts(target, now());
     paint(parts.minutes, parts.seconds);
   };
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {

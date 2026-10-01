@@ -15,7 +15,9 @@ Cloudflare Pages + Functions voting site for `vote.sandiego48.com`.
 
 The home page, or `/c/<code>`, posts the ticket code to `POST /api/enter`. A recognized code is stored in `sessionStorage` and the browser opens `/s/<slug>`. Opening `/s/<slug>` without that session entry returns to the home page. `GET /api/screenings/<slug>` and `GET /api/assets/...` do not check the code. A code that already voted can enter again; the response includes its current selections.
 
-`POST /api/vote` stores each named poll on its own. A poll's `voting` value is `scheduled`, `open`, or `closed`. `scheduled` stores a selection only while the request time is within that poll's `startAt` and `stopAt`. `open` and `closed` start or stop that poll immediately. Closed polls stay grayed out and keep their stored selections. Open polls replace that code's previous selections for the polls in the request, including a count outside the minimum and maximum. Results include a code's picks for a poll only when the saved count is inside that range. A minimum of 0 counts a blank poll. The code is marked used on the first saved change. Entering a code does not check that state. If none of the polls being saved are open, the vote returns 403.
+`POST /api/vote` stores each named poll on its own. A poll's `voting` value is `scheduled`, `open`, or `closed`. `scheduled` stores a selection only while the request time is within that poll's `startAt` and `stopAt`. `open` and `closed` start or stop that poll immediately. Closed polls stay grayed out and keep their stored selections. Open polls replace that code's previous selections for the polls in the request, including a count outside the minimum and maximum. Results include a code's picks for a poll only when the saved count is inside that range. A minimum of 0 counts a blank poll. The code is marked used on the first saved change. Entering a code does not check that state. If none of the polls being saved are open, the vote returns 403. A successful save and that 403 return the stored ballot.
+
+The open ballot posts `POST /api/state` about every 3 seconds while the tab is visible. That response is the server clock, whether each poll is open, and the picks stored for the code. The page updates the pinned header from it, including the countdown. When those stored picks replace what the phone was showing and the count is outside the minimum and maximum, or the poll is closed with a count outside that range, the header says the saved vote does not count.
 
 The ballot frames stills with the poll's aspect ratio and fits each image inside that frame. An option with more than one still crossfades after `imageConfig.cycle` seconds, which defaults to 2. Uploaded files are not checked against the aspect ratio.
 
@@ -49,7 +51,7 @@ Images are jpeg, png, webp, gif, or svg, up to 8 MiB. Uploading the same filenam
 
 Cloudflare Access protects admin URLs. People use the existing email allow policy. An agent uses a service token named `vote-sandiego48-admin-agent`, sent as `CF-Access-Client-Id` and `CF-Access-Client-Secret`.
 
-Unauthenticated requests to `https://vote.sandiego48.com/api/admin` are challenged by Access. Public voting (`/`, `/s/*`, `/c/*`, `/api/enter`, `/api/vote`, `/api/screenings/*`, `/api/assets/*`) stays outside Access.
+Unauthenticated requests to `https://vote.sandiego48.com/api/admin` are challenged by Access. Public voting (`/`, `/s/*`, `/c/*`, `/api/enter`, `/api/vote`, `/api/state`, `/api/screenings/*`, `/api/assets/*`) stays outside Access.
 
 `AGENTS.md` has the setup steps for creating that service token. Leave Pages secret `ADMIN_TOKEN` unset. The Wrangler token used here cannot read the Zero Trust organization, so the service token was not created from this session.
 

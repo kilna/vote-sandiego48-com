@@ -1,3 +1,4 @@
+import { readBallot } from "../ballot";
 import { hashCode } from "../codes";
 import type { Env } from "../types";
 import { votingOpen } from "../voting";
@@ -33,8 +34,14 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     }
     updated += 1;
   }
-  if (!updated) return Response.json({ error: "Voting is not open" }, { status: 403 });
+  if (!updated) return jsonState(env, codeHash, { error: "Voting is not open" }, 403);
   statements.push(env.DB.prepare("UPDATE vote_codes SET used_at = CURRENT_TIMESTAMP WHERE code_hash = ? AND used_at IS NULL").bind(codeHash));
   await env.DB.batch(statements);
-  return Response.json({ ok: true });
+  return jsonState(env, codeHash, { ok: true }, 200);
 };
+
+async function jsonState(env: Env, codeHash: string, body: Record<string, unknown>, status: number) {
+  const state = await readBallot(env, codeHash);
+  const payload = state ? { ...body, now: state.now, polls: state.polls, selections: state.selections } : body;
+  return Response.json(payload, { status, headers: { "Cache-Control": "no-store" } });
+}

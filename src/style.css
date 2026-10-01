@@ -478,18 +478,28 @@ input:not([type="radio"]):not([type="checkbox"]):focus-visible {
   outline-offset: 3px;
 }
 
-.pick-status {
+.poll-pin .pick-status {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
   margin: 0;
-  color: var(--48-navy);
+  padding: 0.35rem 0.7rem;
+  border-radius: 0.45rem;
   font-weight: 800;
 }
 
-.pick-status:empty { display: none; }
+.poll-pin .pick-status:empty { display: none; }
 
-.pick-status.is-short,
-.pick-status.is-over { color: var(--48-orange-dark); }
+.poll-pin .pick-status.is-short,
+.poll-pin .pick-status.is-over {
+  background: var(--48-orange-gradient);
+  color: var(--48-black);
+}
 
-.pick-status.is-counted { color: #167247; }
+.poll-pin .pick-status.is-counted {
+  background: #167247;
+  color: var(--48-white);
+}
 
 .message {
   min-height: 1.5em;
@@ -754,8 +764,7 @@ input:not([type="radio"]):not([type="checkbox"]):focus-visible {
 @media (prefers-reduced-motion: reduce) {
   .option,
   .button,
-  .option-image .still,
-  .selection-toast { transition: none; }
+  .option-image .still { transition: none; }
   .button:hover,
   .option:has(input:checked) { transform: none; }
 }
@@ -827,31 +836,6 @@ input:not([type="radio"]):not([type="checkbox"]):focus-visible {
   font-weight: inherit;
   font-style: inherit;
   line-height: inherit;
-}
-
-.selection-toast {
-  position: fixed;
-  z-index: 20;
-  left: 50%;
-  bottom: 1.25rem;
-  max-width: min(28rem, calc(100% - 1.5rem));
-  margin: 0;
-  padding: 0.7rem 1rem;
-  border: 0.2rem solid var(--48-orange);
-  border-radius: 0.6rem;
-  background: var(--48-navy);
-  color: var(--48-white);
-  font-weight: 800;
-  text-align: center;
-  opacity: 0;
-  pointer-events: none;
-  translate: -50% 0.4rem;
-  transition: opacity 180ms ease, translate 180ms ease;
-}
-
-.selection-toast.is-on {
-  opacity: 1;
-  translate: -50% 0;
 }
 
 .stop-in {

@@ -353,6 +353,7 @@ export function publicIndex() {
       openapi: { href: "/api/openapi.json", method: "GET" },
       enter: { href: "/api/enter", method: "POST" },
       vote: { href: "/api/vote", method: "POST" },
+      state: { href: "/api/state", method: "POST" },
       screening: { href: "/api/screenings/{slug}", method: "GET" },
       admin: { href: "/api/admin", method: "GET" },
     },
@@ -466,11 +467,18 @@ export function openapiDocument() {
     requestBody: jsonBody("EnterRequest", false),
   });
   addPath(paths, "/api/vote", "POST", {
-    ...publicOperation("castVote", "Save picks", "One code covers every poll in the screening. selections maps each poll id being saved to its current option ids. Only those polls are replaced. Each poll stores picks on its own: voting open always stores them, voting closed leaves them unchanged, and voting scheduled stores them only while the request time is within that poll's startAt and stopAt. Minimum and maximum selections are not checked here. Results include a code's picks for a poll only when the saved count is inside that range. The code is marked used on the first saved change. Overlapping saves of the same code can both be recorded. Errors are a single error string.", "VoteResult", {
+    ...publicOperation("castVote", "Save picks", "One code covers every poll in the screening. selections maps each poll id being saved to its current option ids. Only those polls are replaced. Each poll stores picks on its own: voting open always stores them, voting closed leaves them unchanged, and voting scheduled stores them only while the request time is within that poll's startAt and stopAt. Minimum and maximum selections are not checked here. Results include a code's picks for a poll only when the saved count is inside that range. The code is marked used on the first saved change. Overlapping saves of the same code can both be recorded. A successful save, and a save rejected because voting is not open, includes now, polls, and selections for the code after the write. Other errors are a single error string.", "VoteResult", {
       "400": "screeningId, code, or selections is missing, a poll id is not on this screening, or an option id is not on that poll.",
       "403": "The code is not on this screening, or none of the polls being saved are open.",
     }),
     requestBody: jsonBody("VoteRequest", false),
+  });
+  addPath(paths, "/api/state", "POST", {
+    ...publicOperation("readBallotState", "Read the stored ballot", "Returns this code's stored picks and each poll's voting window at the server's current time. The ballot posts here about every 3 seconds while the tab is visible, and again after a save that does not return this snapshot. It does not change votes. A saved count outside minSelections and maxSelections is still returned; the ballot tells the voter that vote does not count.", "BallotState", {
+      "400": "The body is not JSON or the code is empty.",
+      "403": "No vote code matches.",
+    }),
+    requestBody: jsonBody("EnterRequest", false),
   });
   addPath(paths, "/api/screenings/{slug}", "GET", {
     ...publicOperation("getPublicScreening", "Read a public ballot", "Returns the screening voters see. No vote code is required. Image fields are public asset URLs. The HTML page at /s/{slug} is a separate gate and sends the browser back to / unless this session entered a code for that slug.", "PublicScreening", { "404": "No screening uses this slug." }),
@@ -597,7 +605,9 @@ export function openapiDocument() {
         EnterRequest: { type: "object", required: ["code"], additionalProperties: false, properties: { code: { type: "string", description: "Vote code printed on the ticket. Leading and trailing spaces are ignored and letters are compared in uppercase.", examples: ["TEST-1001"] } } },
         EnterResult: { type: "object", required: ["slug", "title", "used", "selections"], properties: { slug: { type: "string" }, title: { type: "string" }, used: { type: "boolean", description: "True after this code has saved a pick." }, selections: { type: "object", additionalProperties: { type: "array", items: { type: "string" } }, description: "Current option ids by poll id, including picks outside the minimum and maximum. Empty when the code has not voted." }, error: { type: "string" } } },
         VoteRequest: { type: "object", required: ["screeningId", "code", "selections"], additionalProperties: false, properties: { screeningId: { type: "string", description: "Screening id from GET /api/screenings/{slug}." }, code: { type: "string" }, selections: { type: "object", additionalProperties: { type: "array", items: { type: "string" } }, description: "Map of poll id to chosen option ids." } } },
-        VoteResult: { type: "object", properties: { ok: { type: "boolean" }, error: { type: "string" } } },
+        VoteResult: { type: "object", properties: { ok: { type: "boolean" }, error: { type: "string" }, now: { type: "string", format: "date-time" }, polls: { type: "array", items: { $ref: "#/components/schemas/BallotPoll" } }, selections: { type: "object", additionalProperties: { type: "array", items: { type: "string" } } } } },
+        BallotState: { type: "object", required: ["now", "slug", "title", "screeningId", "used", "polls", "selections"], properties: { now: { type: "string", format: "date-time", description: "Server time when this snapshot was read." }, slug: { type: "string" }, title: { type: "string" }, screeningId: { type: "string" }, used: { type: "boolean" }, polls: { type: "array", items: { $ref: "#/components/schemas/BallotPoll" } }, selections: { type: "object", additionalProperties: { type: "array", items: { type: "string" } }, description: "Stored option ids by poll id, including a count outside the minimum and maximum." } } },
+        BallotPoll: { type: "object", required: ["id", "voting", "votingOpen", "startAt", "stopAt"], properties: { id: { type: "string" }, voting: { type: "string", enum: ["scheduled", "open", "closed"] }, votingOpen: { type: "boolean", description: "Whether a pick saved at this response would be stored." }, startAt: { type: "string", format: "date-time" }, stopAt: { type: "string", format: "date-time" } } },
         PublicScreening: { type: "object", description: "Ballot payload. Poll and option fields use camelCase. images and bannerImage are asset URLs." },
         Asset: { type: "string", format: "binary" },
       },

@@ -1,7 +1,8 @@
 import "./style.css";
 import { startAdmin } from "./admin";
 import { startClock } from "./countdown";
-import { nextVotingCue } from "../functions/voting";
+import { nextVotingCue, votingOpen } from "../functions/voting";
+import { pickMessage, samePicks, shouldApplySelections } from "./sync";
 
 type Voting = "scheduled" | "open" | "closed";
 type Poll = {
@@ -30,12 +31,24 @@ let activeCode = "";
 let selections: Record<string, string[]> = {};
 let saveFlight: Promise<void> | null = null;
 let saveAgain = false;
+let stateFlight: Promise<void> | null = null;
+let stateAgain = false;
+let edits = 0;
+let writes = 0;
+let skewMs = 0;
+const corrected = new Set<string>();
 const clockStops = new Map<string, () => void>();
 const clockKeys = new Map<string, string>();
-let armed: { at: number; kind: "start" | "end" } | null = null;
 let watch = 0;
-let toastTimer = 0;
+let stateTimer = 0;
 let cycles: number[] = [];
+const stateEveryMs = 3000;
+
+type BallotSnapshot = {
+  now: string;
+  polls: { id: string; voting: Voting; votingOpen: boolean; startAt: string; stopAt: string }[];
+  selections: Record<string, string[]>;
+};
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c] || c));
 
@@ -54,30 +67,28 @@ function unavailable(message: string) { app.innerHTML = `${brandHeader()}<main c
 function frameRatio(value?: string) { const match = /^(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)$/.exec(value || ""); return match ? `${match[1]} / ${match[2]}` : "16 / 9"; }
 function cycleSeconds(value: unknown) { const seconds = typeof value === "number" ? value : Number(value); return Number.isInteger(seconds) && seconds >= 1 && seconds <= 60 ? seconds : 2; }
 function pollOpen(poll: Poll) { return poll.votingOpen === true; }
+function serverNow() { return Date.now() + skewMs; }
 
 function notStarted(poll: Poll) {
   if (poll.voting === "open" || poll.voting === "closed") return false;
   const start = Date.parse(poll.startAt);
-  return Number.isFinite(start) && Date.now() < start;
-}
-
-function statusText(poll: Poll) {
-  if (pollOpen(poll)) return "";
-  return notStarted(poll) ? "Voting isn't open yet" : "Voting is closed";
+  return Number.isFinite(start) && serverNow() < start;
 }
 
 function render(s: Screening) {
   window.clearInterval(watch);
   cycles.forEach((id) => window.clearInterval(id));
   cycles = [];
-  window.clearTimeout(toastTimer);
   clearClocks();
-  armed = null;
   current = s;
   const hero = s.bannerImage ? `<div class="screening-banner" style="background-image:url('${esc(s.bannerImage)}')"></div>` : "";
-  app.innerHTML = `${brandHeader(Boolean(s.bannerImage))}${hero}<main><section class="intro"><span class="kicker">Audience voting</span><h1>${esc(s.title)}</h1>${s.venue ? `<p class="venue">${esc(s.venue)}</p>` : ""}<p>Make your picks. Vote code <strong>${esc(activeCode)}</strong>.</p></section><div id="ballot"><div id="polls">${s.polls.map(renderPoll).join("")}</div></div></main><p id="selection-toast" class="selection-toast" role="status"></p>`;
+  app.innerHTML = `${brandHeader(Boolean(s.bannerImage))}${hero}<main><section class="intro"><span class="kicker">Audience voting</span><h1>${esc(s.title)}</h1>${s.venue ? `<p class="venue">${esc(s.venue)}</p>` : ""}<p>Make your picks. Vote code <strong>${esc(activeCode)}</strong>.</p></section><div id="ballot"><div id="polls">${s.polls.map(renderPoll).join("")}</div></div></main>`;
   document.querySelectorAll<HTMLElement>("[data-cycle]").forEach(startCycle);
-  for (const poll of s.polls) bindPoll(poll);
+  for (const poll of s.polls) {
+    bindPoll(poll);
+    paintWindow(poll);
+  }
+  syncCountdowns();
   watchVoting();
 }
 
@@ -95,44 +106,21 @@ function renderPoll(poll: Poll) {
   }).join("");
   const rule = poll.minSelections === poll.maxSelections ? `Select ${poll.minSelections}` : `Select ${poll.minSelections}–${poll.maxSelections}`;
   const titleId = `poll-${poll.id}-title`;
-  const status = statusText(poll);
-  const ended = !open && !notStarted(poll);
-  const statusLine = status ? `<p class="window closed">${esc(status)}</p>` : "";
-  const pick = pickCopy(poll, chosen.size);
-  const pickLine = open ? `<p class="pick-status${pick.className}" data-pick-status="${esc(poll.id)}">${esc(pick.text)}</p>` : "";
-  return `<fieldset class="poll${open ? "" : " is-closed"}" aria-labelledby="${esc(titleId)}"><div class="poll-pin"><div class="poll-heading"><h2 class="poll-title" id="${esc(titleId)}">${esc(poll.title)}</h2><span class="rule">${rule}</span></div><div class="countdown" data-countdown="${esc(poll.id)}" hidden><span class="countdown-prefix"></span><span class="countdown-clock"></span></div>${statusLine}${pickLine}</div>${poll.instructions ? `<p class="instructions">${esc(poll.instructions)}</p>` : ""}${ended ? `<p class="help">This poll is closed. The picks shown here stay as they are.</p>` : ""}<div class="options">${options}</div></fieldset>`;
-}
-
-function pickCopy(poll: Poll, count: number) {
-  if (count < poll.minSelections) {
-    const remaining = poll.minSelections - count;
-    const text = remaining === 1 ? "Select 1 more" : `Select ${remaining} more`;
-    return { text, className: " is-short", toast: `${text} for ${poll.title}` };
-  }
-  if (count > poll.maxSelections) {
-    const text = `Select at most ${poll.maxSelections}`;
-    return { text, className: " is-over", toast: `${text} for ${poll.title}` };
-  }
-  if (count === 0) return { text: "", className: "", toast: "" };
-  return { text: "Your vote counts", className: " is-counted", toast: `Your vote counts for ${poll.title}` };
+  return `<fieldset class="poll${open ? "" : " is-closed"}" data-poll="${esc(poll.id)}" aria-labelledby="${esc(titleId)}"><div class="poll-pin"><div class="poll-heading"><h2 class="poll-title" id="${esc(titleId)}">${esc(poll.title)}</h2><span class="rule">${rule}</span></div><div class="countdown" data-countdown="${esc(poll.id)}" hidden><span class="countdown-prefix"></span><span class="countdown-clock"></span></div><p class="window" data-window="${esc(poll.id)}" hidden></p><p class="pick-status" data-pick-status="${esc(poll.id)}" role="status"></p></div>${poll.instructions ? `<p class="instructions">${esc(poll.instructions)}</p>` : ""}<div class="options">${options}</div></fieldset>`;
 }
 
 function bindPoll(poll: Poll) {
-  if (!pollOpen(poll)) return;
   const inputs = document.querySelectorAll<HTMLInputElement>(`input[name="poll-${CSS.escape(poll.id)}"]`);
   inputs.forEach((input) => input.addEventListener("change", () => onPollChange(poll)));
 }
 
 function onPollChange(poll: Poll) {
+  if (!pollOpen(poll)) return;
+  edits += 1;
+  corrected.delete(poll.id);
   const checked = Array.from(document.querySelectorAll<HTMLInputElement>(`input[name="poll-${CSS.escape(poll.id)}"]:checked`));
-  const copy = pickCopy(poll, checked.length);
-  const status = document.querySelector<HTMLElement>(`[data-pick-status="${CSS.escape(poll.id)}"]`);
-  if (status) {
-    status.textContent = copy.text;
-    status.className = `pick-status${copy.className}`;
-  }
-  if (copy.toast) showToast(copy.toast);
   selections[poll.id] = checked.map((input) => input.value);
+  paintPick(poll);
   scheduleSave();
 }
 
@@ -162,44 +150,91 @@ function openSelections() {
 async function saveSelections() {
   const chosen = openSelections();
   if (!Object.keys(chosen).length) return;
+  const editsAtSend = edits;
+  const writesAtSend = writes;
+  let applied = false;
   try {
     const response = await fetch("/api/vote", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ screeningId: current.id, code: activeCode, selections: chosen }) });
-    const data = await response.json() as { error?: string };
-    if (!response.ok) throw Error(data.error || "That pick could not be saved");
-    for (const [id, ids] of Object.entries(chosen)) selections[id] = ids;
-    saveEntry({ code: activeCode, slug, selections });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "That pick could not be saved";
-    showToast(message);
-    if (message === "Voting is not open") {
+    const data = await response.json().catch(() => null) as (BallotSnapshot & { error?: string }) | null;
+    if (data && isSnapshot(data)) {
+      applyWindows(data);
+      if (shouldApplySelections({ edits, editsAtSend, writes, writesAtSend, saveInFlight: false })) {
+        applySelections(data);
+        applied = true;
+      }
+    }
+    if (!response.ok) throw Error(data?.error || "That pick could not be saved");
+    writes += 1;
+    if (!applied) {
+      for (const [id, ids] of Object.entries(chosen)) selections[id] = ids;
+      saveEntry({ code: activeCode, slug, selections });
+    }
+  } catch {
+    if (!applied) {
       saveAgain = false;
-      void refreshBallot();
+      for (const poll of current.polls) markUnsaved(poll);
+      requestState();
     }
   }
 }
 
-function showToast(text: string) {
-  const el = document.querySelector<HTMLElement>("#selection-toast");
-  if (!el) return;
-  el.textContent = text;
-  el.classList.add("is-on");
-  window.clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => el.classList.remove("is-on"), 1400);
+function markUnsaved(poll: Poll) {
+  if (!pollOpen(poll)) return;
+  const status = document.querySelector<HTMLElement>(`[data-pick-status="${CSS.escape(poll.id)}"]`);
+  if (!status) return;
+  status.textContent = "That change was not saved";
+  status.className = "pick-status is-short";
 }
 
 function watchVoting() {
   const tick = () => {
-    const hold = armed?.kind === "end" ? 1000 : 0;
-    if (armed && Date.now() >= armed.at + hold) {
-      armed = null;
-      window.clearInterval(watch);
-      void refreshBallot();
-      return;
+    let flipped = false;
+    for (const poll of current.polls) {
+      const before = poll.votingOpen === true;
+      freshenScheduled(poll);
+      if ((poll.votingOpen === true) !== before) flipped = true;
+    }
+    if (flipped) {
+      for (const poll of current.polls) paintWindow(poll);
+      requestState();
     }
     syncCountdowns();
   };
   tick();
   watch = window.setInterval(tick, 250);
+}
+
+function freshenScheduled(poll: Poll) {
+  if (poll.voting === "open") poll.votingOpen = true;
+  else if (poll.voting === "closed") poll.votingOpen = false;
+  else poll.votingOpen = votingOpen(poll.voting, poll.startAt, poll.stopAt, serverNow());
+}
+
+function paintWindow(poll: Poll) {
+  const field = document.querySelector<HTMLElement>(`[data-poll="${CSS.escape(poll.id)}"]`);
+  if (!field) return;
+  const open = pollOpen(poll);
+  field.classList.toggle("is-closed", !open);
+  field.querySelectorAll<HTMLInputElement>("input").forEach((input) => { input.disabled = !open; });
+  const windowEl = field.querySelector<HTMLElement>("[data-window]");
+  if (windowEl && !open) {
+    windowEl.hidden = false;
+    windowEl.className = "window closed";
+    windowEl.textContent = notStarted(poll) ? "Voting isn't open yet" : "Voting is closed. These picks stay as they are.";
+  } else if (windowEl) {
+    windowEl.hidden = true;
+    windowEl.textContent = "";
+  }
+  paintPick(poll);
+}
+
+function paintPick(poll: Poll) {
+  const status = document.querySelector<HTMLElement>(`[data-pick-status="${CSS.escape(poll.id)}"]`);
+  if (!status) return;
+  const count = document.querySelectorAll<HTMLInputElement>(`input[name="poll-${CSS.escape(poll.id)}"]:checked`).length;
+  const copy = pickMessage(poll, count, { corrected: corrected.has(poll.id), open: pollOpen(poll) });
+  status.textContent = copy.text;
+  status.className = `pick-status${copy.className}`;
 }
 
 function clearClocks() {
@@ -208,43 +243,123 @@ function clearClocks() {
   clockKeys.clear();
 }
 
+function formatTime(iso: string) {
+  const at = Date.parse(iso);
+  if (!Number.isFinite(at)) return "";
+  return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(at));
+}
+
 function syncCountdowns() {
-  let soonest: { at: number; kind: "start" | "end" } | null = null;
+  const now = serverNow();
   for (const poll of current.polls) {
-    const cue = nextVotingCue([poll]);
+    const cue = nextVotingCue([poll], now);
     const box = document.querySelector<HTMLElement>(`[data-countdown="${CSS.escape(poll.id)}"]`);
+    const windowEl = document.querySelector<HTMLElement>(`[data-window="${CSS.escape(poll.id)}"]`);
     if (!box) continue;
-    if (cue && (!soonest || cue.at < soonest.at)) soonest = { at: cue.at, kind: cue.kind };
-    if (!cue || cue.kind === "start") {
+    if (!cue) {
       box.hidden = true;
       clockStops.get(poll.id)?.();
       clockStops.delete(poll.id);
       clockKeys.delete(poll.id);
+      const when = formatTime(poll.stopAt);
+      if (windowEl && pollOpen(poll) && poll.voting === "scheduled" && when) {
+        windowEl.hidden = false;
+        windowEl.className = "window";
+        windowEl.textContent = `Voting ends at ${when}`;
+      }
       continue;
     }
+    if (windowEl) windowEl.hidden = true;
     box.hidden = false;
     const label = box.querySelector<HTMLElement>(".countdown-prefix");
-    if (label) label.textContent = "Voting ends in";
+    if (label) label.textContent = cue.kind === "end" ? "Voting ends in" : "Voting starts in";
     const key = `${cue.kind}:${cue.at}`;
     if (clockKeys.get(poll.id) === key) continue;
     clockKeys.set(poll.id, key);
     clockStops.get(poll.id)?.();
     const clock = box.querySelector<HTMLElement>(".countdown-clock");
-    if (clock) clockStops.set(poll.id, startClock(clock, cue.at));
+    if (clock) clockStops.set(poll.id, startClock(clock, cue.at, serverNow));
   }
-  if (soonest) armed = soonest;
 }
 
-async function refreshBallot() {
-  try {
-    const screening = await loadScreening(slug);
-    const entered = await enter(activeCode);
-    selections = entered.selections;
-    saveEntry({ code: activeCode, slug, selections });
-    render(screening);
-  } catch {
-    /* Keep the ballot on screen if the refresh fails. */
+function isSnapshot(data: BallotSnapshot) {
+  return typeof data.now === "string" && Array.isArray(data.polls) && !!data.selections && typeof data.selections === "object" && !Array.isArray(data.selections);
+}
+
+function noteSkew(now: string) {
+  const stamp = Date.parse(now);
+  if (Number.isFinite(stamp)) skewMs = stamp - Date.now();
+}
+
+function applyWindows(snapshot: BallotSnapshot) {
+  noteSkew(snapshot.now);
+  const byId = new Map(snapshot.polls.map((poll) => [poll.id, poll]));
+  for (const poll of current.polls) {
+    const next = byId.get(poll.id);
+    if (!next) continue;
+    poll.voting = next.voting;
+    poll.votingOpen = next.votingOpen;
+    poll.startAt = next.startAt;
+    poll.stopAt = next.stopAt;
   }
+  for (const poll of current.polls) paintWindow(poll);
+  syncCountdowns();
+}
+
+function applySelections(snapshot: BallotSnapshot) {
+  for (const poll of current.polls) {
+    const stored = snapshot.selections[poll.id] || [];
+    const inputs = Array.from(document.querySelectorAll<HTMLInputElement>(`input[name="poll-${CSS.escape(poll.id)}"]`));
+    const local = inputs.filter((input) => input.checked).map((input) => input.value);
+    const outside = stored.length < poll.minSelections || stored.length > poll.maxSelections;
+    if (!samePicks(local, stored)) corrected.add(poll.id);
+    else if (!outside) corrected.delete(poll.id);
+    const storedSet = new Set(stored);
+    for (const input of inputs) input.checked = storedSet.has(input.value);
+    selections[poll.id] = stored;
+    paintPick(poll);
+  }
+  saveEntry({ code: activeCode, slug, selections });
+}
+
+function requestState() {
+  if (!activeCode || !current) return;
+  if (stateFlight) {
+    stateAgain = true;
+    return;
+  }
+  const editsAtSend = edits;
+  const writesAtSend = writes;
+  stateFlight = pullState(editsAtSend, writesAtSend).finally(() => {
+    stateFlight = null;
+    if (stateAgain) {
+      stateAgain = false;
+      requestState();
+    }
+  });
+}
+
+async function pullState(editsAtSend: number, writesAtSend: number) {
+  try {
+    const response = await fetch("/api/state", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: activeCode }) });
+    const data = await response.json() as BallotSnapshot & { error?: string };
+    if (!response.ok || !isSnapshot(data)) return;
+    applyWindows(data);
+    if (shouldApplySelections({ edits, editsAtSend, writes, writesAtSend, saveInFlight: Boolean(saveFlight) })) applySelections(data);
+  } catch {
+    /* The next poll retries. */
+  }
+}
+
+function startStatePoll() {
+  window.clearInterval(stateTimer);
+  stateTimer = window.setInterval(() => {
+    if (document.visibilityState === "visible") requestState();
+  }, stateEveryMs);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") requestState();
+  });
+  requestState();
 }
 
 function startCycle(el: HTMLElement) {
@@ -330,6 +445,7 @@ async function openScreening() {
     selections = entered.selections;
     saveEntry({ code: entry.code, slug: entered.slug, selections });
     render(screening);
+    startStatePoll();
   } catch (err) {
     if (err instanceof Error && /recognized|could not be checked/i.test(err.message)) renderGate(err.message, entry.code);
     else unavailable("Screening not found");
