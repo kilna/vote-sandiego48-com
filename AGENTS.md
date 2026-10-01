@@ -17,14 +17,17 @@
 
 ## Implemented behavior
 
-- One screening can have multiple polls.
-- A vote code is unique across the site. The home page asks for that code and opens the screening it belongs to. One code is submitted once for all polls in that screening.
-- Codes are SHA-256 hashed before storage; successful votes consume a code.
-- Each poll independently declares minimum and maximum selections.
-- Screenings, polls, options, images, and vote codes are created through `/api/admin`. `GET /api` links to `GET /api/openapi.json`. `GET /api/admin` lists `workflows.createScreening` in the order an agent should call it.
-- `/admin` is a CRUD editor for those same routes. It asks for the admin bearer token and keeps it in session storage.
-- Each screening has a configurable banner image; the public header renders it as a mobile-friendly hero.
-- Film options can have multiple stills, which cycle every four seconds. Poster and film image constraints are represented in `image_config`.
+- One screening can have multiple polls. Each poll has its own title, instructions, sort order, and minimum and maximum selections.
+- A vote code is unique across the site. The home page posts it to `POST /api/enter`. A recognized unused code is stored in `sessionStorage` and opens `/s/<slug>`. Opening that path without a matching session entry returns to `/`. `GET /api/screenings/<slug>` and `GET /api/assets/...` do not check the code.
+- Codes are trimmed, uppercased, and SHA-256 hashed before storage. A successful `POST /api/vote` writes one row per selected option and marks the code used in the same D1 batch. A used code cannot enter or vote again. That batch is not safe against two submissions of the same code at once.
+- `POST /api/vote` accepts a ballot only while the request time is within `startAt` and `stopAt`. `POST /api/enter` does not check that window. The ballot shows open or closed and still submits; a closed window returns 403.
+- The screening `timezone` is a stored label. The admin form interprets its time inputs in the browser's timezone and stores UTC instants. The ballot formats those instants in the viewer's timezone.
+- Screenings, polls, options, images, and vote codes are created through `/api/admin`. `GET /api` links to `GET /api/openapi.json`. `GET /api/admin` lists `workflows.createScreening` in the order an agent should call it. Admin validation errors name the field. Public enter and vote errors are a single `error` string.
+- `/admin` is a CRUD editor for those same routes. Cloudflare Access signs the browser in. Routes are `/admin`, `/admin/screenings/new`, and `/admin/screenings/<slug>`.
+- Vote codes can be counted, added, and removed. Plaintext codes are not stored and cannot be listed. Adding a code that already belongs to another screening stores nothing. Removing a used code leaves it, and does not delete votes.
+- Each screening can have a banner. The public header renders it as a hero. Film options can have several stills. The ballot uses the poll aspect ratio as the frame and swaps an option's stills every four seconds when there is more than one. `imageConfig.cycle`, `min`, and `max` are stored and edited; the ballot does not read `cycle`, and uploads are not checked against the still counts or the aspect ratio.
+- Images are jpeg, png, webp, gif, or svg, up to 8 MiB. The storage key is `{screeningId}/{filename}`. Uploading the same filename replaces the object. Asset responses use `Cache-Control: public, max-age=3600`. Unlinking an image, or deleting a poll or option, leaves the object. Deleting a screening deletes the database rows and then the objects under that screening id.
+- There is no ZIP or YAML import. `fixtures/test-screening/` is not loaded by the app.
 - Visual direction follows the current San Diego 48 site: purple, navy, orange, pink, yellow, halftone texture, and League Spartan.
 
 ## Development commands
@@ -37,13 +40,15 @@ npm test
 npm run build
 ```
 
+`npm run dev` serves the Vite frontend only. Pages Functions, D1, and R2 run under Wrangler (`wrangler pages dev`). A gitignored `.dev.vars` file can set `ACCESS_DEV_BYPASS=1` so that local process accepts admin calls on localhost. `npm test` checks the admin contract and Access JWT rules. It does not cast votes or use D1.
+
 ## Cloudflare status
 
 - Pages project, D1 database, and R2 bucket named `vote-sandiego48-com` exist; the initial D1 migration is applied.
 - `vote.sandiego48.com` is attached to Pages and its Cloudflare DNS record is a proxied CNAME to `vote-sandiego48-com.pages.dev`. Pages domain status and both verification/validation statuses were confirmed active; the hostname was also checked through a headless browser.
 - GitHub Actions secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are configured, and a push-driven Wrangler 4 deployment succeeded.
-- Browser access to `/admin` is gated by a Cloudflare Access email allow policy. That policy does not yet cover `/api/admin` or `vote-sandiego48-com.pages.dev`. The service token for agents is not created yet. See [Admin access](#admin-access).
-- Pages secret `ADMIN_TOKEN` is unset. Leave it unset. `functions/api/admin/` still returns `401` with JSON `{"error":"Unauthorized..."}` unless that bearer token is present. Access is the admin gate; a later code change will verify `Cf-Access-Jwt-Assertion` and remove the bearer check.
+- Cloudflare Access challenges unauthenticated requests to `/api/admin` on `vote.sandiego48.com`. A WARP session for `kilna@kilna.com` receives `CF_Authorization` on `/admin` and `/api/admin` for both `vote.sandiego48.com` and `vote-sandiego48-com.pages.dev`. The Wrangler OAuth token cannot read the Zero Trust organization (403), so the email Allow policy and the agent service token could not be listed or created from this session. See [Admin access](#admin-access).
+- Admin Functions verify `Cf-Access-Jwt-Assertion` against `https://kilna.cloudflareaccess.com` and the audience tags in `functions/access.ts`. A human JWT must use a `@kilna.com` email or `sandiego@48hourfilm.com`. A service-token JWT has `type` `app`, `common_name`, and no email, and is accepted when the signature, issuer, and audience match. Pages secret `ADMIN_TOKEN` stays unset. This code is not live until the next Pages deploy.
 - The Pages project is Direct Upload, with deployment via GitHub Actions; it is **not** natively Git-connected.
 - The home page is a vote-code gate. A valid code opens that code's screening. Production still has no live screening or generated vote code. This is a deployed scaffold, **not a voting-ready service**.
 
@@ -79,7 +84,7 @@ This is Cloudflare configuration only. Do not change application code, do not se
    | `vote-sandiego48-com.pages.dev` | `/api/admin/*` |
 
 3. If preview deployments (`*.vote-sandiego48-com.pages.dev`) are enabled, add the same three paths there. If they are disabled, record that.
-4. Leave the existing email Allow policy as an Allow policy.
+4. Keep an email Allow policy for every `@kilna.com` address and for `sandiego@48hourfilm.com`. The Function checks that same list on human JWTs.
 5. Create a service token named `vote-sandiego48-admin-agent`. Use a non-expiring duration when the dashboard offers one; otherwise use one year (`8760h`). Copy the Client Secret at creation. Cloudflare shows it once.
 6. On the same application, add a second policy named `vote-sandiego48-admin-agent`. Action **Service Auth** (Access API value `non_identity`). Include rule: selector Service Token, value `vote-sandiego48-admin-agent`. Keep this policy separate from the email Allow policy.
 7. Leave service-token header mode on the default pair `CF-Access-Client-Id` and `CF-Access-Client-Secret`. Do not set `read_service_tokens_from_header` to `Authorization`.
@@ -90,7 +95,7 @@ This is Cloudflare configuration only. Do not change application code, do not se
    curl -sS -D - -o /dev/null --max-redirs 0 "https://vote.sandiego48.com/api/admin"
    curl -sS -D - -o /dev/null --max-redirs 0 "https://vote-sandiego48-com.pages.dev/api/admin"
 
-   # Reaches the Function and returns 401 JSON until the bearer check is removed.
+   # Reaches the Function. GET /api/admin returns 200 and the admin index when the service token is valid.
    curl -sS -D - --max-redirs 0 \
      -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
      -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
@@ -105,11 +110,12 @@ This is Cloudflare configuration only. Do not change application code, do not se
 
 ### Status
 
-- Access application:
-- Team domain:
-- Application AUD:
-- Protected hostnames and paths:
-- Preview deployments:
+- Access application: name not readable with the current Wrangler token. Two audience tags are in use.
+- Team domain: `https://kilna.cloudflareaccess.com`
+- Application AUD for `vote.sandiego48.com`: `cb94a9f99e4d085bf79b0d2a56060f395d56c56cf264eebc8182f5cc42b22b11`
+- Application AUD for `vote-sandiego48-com.pages.dev`: `0eb602488e9900b4a156d005eb7145653a1a6c9ddf9c04fdf16e046db2965d5a`
+- Protected hostnames and paths: `/admin` and `/api/admin` on both hostnames present an Access JWT to an authenticated WARP session. Unauthenticated `GET /api/admin` on `vote.sandiego48.com` does not reach the Function. Confirm `/api/admin/*` in the dashboard if a deeper admin path is challenged differently from `/api/admin`.
+- Preview deployments: not checked
 - Service token name: `vote-sandiego48-admin-agent`
 - Service token id:
 - Service token client id:
@@ -122,17 +128,18 @@ CF-Access-Client-Id: <client id>
 CF-Access-Client-Secret: <client secret>
 ```
 
-Read those values from `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` in the environment. After Access accepts the token, it injects `Cf-Access-Jwt-Assertion`. The Function will trust that JWT once the bearer check is removed.
+Read those values from `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` in the environment. After Access accepts the token, it injects `Cf-Access-Jwt-Assertion`. The Function verifies that JWT.
 
-## Important follow-up work
+## Not implemented yet
 
-- Verify `Cf-Access-Jwt-Assertion` in `functions/api/admin/` against the Access team certs and this application's AUD, then remove the `ADMIN_TOKEN` bearer check.
-- Add vote results for a screening. Admin CRUD covers screenings, polls, options, images, and vote codes.
-- Add tests for concurrent use of the same code and make vote-code consumption atomic with vote insertion; the current read-then-batch path is **not safe against simultaneous submissions**.
-- `imageConfig` min, max, and aspect ratio are stored for the ballot and are not checked against the uploaded files. Uploading the same filename replaces the stored object.
+- Create the Access service token in the status block above if it does not already exist, and confirm the email Allow policy includes `@kilna.com` and `sandiego@48hourfilm.com`. The Wrangler OAuth token cannot read or edit Zero Trust. The admin Functions already verify the Access JWT; production keeps the previous bearer check until the next Pages deploy.
+- Add vote results for a screening. Admin CRUD covers screenings, polls, options, images, and vote codes. Nothing totals votes.
+- Make vote-code consumption atomic with vote insertion, and test two submissions of the same code at once. The handler reads the code, then inserts votes and sets `used_at` in a later batch. The update does not require that it changed a row, and `votes` has no uniqueness constraint on the code, so both submissions can be stored.
+- Accept a poll left blank when `minSelections` is 0. The vote handler still builds `IN ()` for an empty selection and the request fails. The ballot also renders a required radio whenever `maxSelections` is 1, so the browser will not submit that poll empty.
+- Honor `imageConfig.cycle` on the public ballot. Today every option with more than one still cycles every four seconds. Check uploaded files against `imageConfig` min, max, and aspect ratio. Those values are stored and shown in `/admin` only. Replacing a file keeps the same URL, and clients can keep the previous bytes for up to an hour.
 - Add rate limiting and abuse protection on public vote submission.
-- Add local D1/R2 integration tests or a Miniflare-compatible test harness.
-- Add accessibility review on a real phone viewport, including keyboard focus, error announcements, and touch target sizing.
+- Add local D1/R2 integration tests or a Miniflare-compatible test harness. Current tests do not execute `POST /api/vote` or the admin database writes.
+- Add an accessibility review on a real phone viewport, including keyboard focus, error announcements, and touch target sizing.
 
 ## Do not
 

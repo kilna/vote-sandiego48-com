@@ -70,7 +70,7 @@ export type Validation =
   | { ok: true; value: Record<string, unknown> }
   | { ok: false; fields: Record<string, string> };
 
-const imageConfigDescription = "How the ballot frames stills. aspectRatio is width:height, such as 16:9 for film or 2:3 for a poster. min and max are the intended still counts. cycle swaps multiple stills every four seconds. These values are stored and shown to voters. The API does not measure image files or reject an option whose still count is outside min and max.";
+const imageConfigDescription = "How the ballot frames stills. aspectRatio is width:height, such as 16:9 for film or 2:3 for a poster, and the public ballot uses it as the frame. min and max are intended still counts. cycle is stored and returned. The public ballot does not read cycle: an option with more than one still swaps images every four seconds either way. The API does not measure image files or reject an option whose still count is outside min and max.";
 
 export const screeningWrite: ObjectSchema = {
   description: "Fields required to create a screening. Voting opens and closes at the exact instants in startAt and stopAt.",
@@ -349,10 +349,12 @@ export function adminIndex() {
     title: "San Diego 48 admin API",
     openapi: "/api/openapi.json",
     authentication: {
-      type: "http",
-      scheme: "bearer",
-      header: "Authorization",
-      description: "Send the Pages secret ADMIN_TOKEN as Authorization: Bearer <token>. Cloudflare Access may also require CF-Access-Client-Id and CF-Access-Client-Secret before the request reaches this API. Those headers do not replace the bearer token.",
+      type: "cloudflare-access",
+      browser: "Open /admin after Cloudflare Access signs you in. Allowed emails are any @kilna.com address and sandiego@48hourfilm.com.",
+      serviceToken: {
+        headers: ["CF-Access-Client-Id", "CF-Access-Client-Secret"],
+        description: "Agents send the Access service token pair. Access checks it and adds Cf-Access-Jwt-Assertion before this API runs.",
+      },
     },
     links: {
       screenings: { href: "/api/admin/screenings", method: "GET" },
@@ -414,7 +416,7 @@ const imageConfigSchema = {
     aspectRatio: { type: "string", pattern: RATIO, description: "Width:height, such as 16:9 or 2:3.", examples: ["16:9"] },
     min: { type: "integer", minimum: 0, description: "Intended minimum number of stills.", examples: [1] },
     max: { type: "integer", minimum: 0, description: "Intended maximum number of stills.", examples: [2] },
-    cycle: { type: "boolean", description: "Swap multiple stills every four seconds.", default: false },
+    cycle: { type: "boolean", description: "Stored on the poll. The public ballot does not read it; more than one still always cycles every four seconds.", default: false },
   },
 };
 
@@ -433,21 +435,29 @@ const errorSchema = {
 export function openapiDocument() {
   const paths: Record<string, Record<string, unknown>> = {};
   for (const route of adminRoutes) addPath(paths, adminPath(route), route.method, adminOperation(route));
-  addPath(paths, "/api", "GET", publicOperation("getApiIndex", "Discover the API", "Public entry point. Follow links.openapi, then links.admin for screening setup.", "PublicIndex"));
-  addPath(paths, "/api/openapi.json", "GET", publicOperation("getOpenApi", "OpenAPI document", "Machine-readable contract for the public and admin APIs.", "OpenApiDocument"));
+  addPath(paths, "/api", "GET", publicOperation("getApiIndex", "Discover the API", "Public entry point. Follow links.openapi, then links.admin for screening setup.", "PublicIndex", { "405": "Use GET." }));
+  addPath(paths, "/api/openapi.json", "GET", publicOperation("getOpenApi", "OpenAPI document", "Machine-readable contract for the public and admin APIs.", "OpenApiDocument", { "405": "Use GET." }));
   addPath(paths, "/api/enter", "POST", {
-    ...publicOperation("enterWithCode", "Open a ballot with a vote code", "Trims and uppercases the code, then returns the screening slug when the code exists and has not been used.", "EnterResult"),
+    ...publicOperation("enterWithCode", "Open a ballot with a vote code", "Trims and uppercases the code, hashes it, and returns the screening slug when that code exists and has not been used. Does not check startAt or stopAt. The response is an error string, not field names.", "EnterResult", {
+      "400": "The body is not JSON or the code is empty.",
+      "403": "No vote code matches.",
+      "409": "The code was already used.",
+    }),
     requestBody: jsonBody("EnterRequest", false),
   });
   addPath(paths, "/api/vote", "POST", {
-    ...publicOperation("castVote", "Cast a ballot", "One code covers every poll in the screening. selections maps each poll id to the chosen option ids. The code is consumed only after every poll validates.", "VoteResult"),
+    ...publicOperation("castVote", "Cast a ballot", "One code covers every poll in the screening. selections maps each poll id to chosen option ids. The server checks the voting window and each poll's minimum and maximum, then writes the vote rows and marks the code used in one batch. Overlapping submissions of the same code can both be recorded. Leaving a poll with no selections builds an empty SQL IN list and the request fails, including when minSelections is 0. Errors are a single error string.", "VoteResult", {
+      "400": "screeningId, code, or selections is missing, a poll's selection count is outside its bounds, or an option id is not on that poll.",
+      "403": "The code is not on this screening, or the current time is outside startAt and stopAt.",
+      "409": "The code was already used.",
+    }),
     requestBody: jsonBody("VoteRequest", false),
   });
   addPath(paths, "/api/screenings/{slug}", "GET", {
-    ...publicOperation("getPublicScreening", "Read a public ballot", "Returns the screening voters see. Image fields are public asset URLs.", "PublicScreening"),
+    ...publicOperation("getPublicScreening", "Read a public ballot", "Returns the screening voters see. No vote code is required. Image fields are public asset URLs. The HTML page at /s/{slug} is a separate gate and sends the browser back to / unless this session entered a code for that slug.", "PublicScreening", { "404": "No screening uses this slug." }),
     parameters: [pathParam("slug", "Screening slug.")],
   });
-  addPath(paths, "/api/assets/{path}", "GET", publicOperation("getAsset", "Read an uploaded image", "path is the storage key with each segment encoded. Admin resources return a ready-to-use url, so callers do not need to build this path.", "Asset"));
+  addPath(paths, "/api/assets/{path}", "GET", publicOperation("getAsset", "Read an uploaded image", "path is the storage key with each segment encoded. The response Content-Type is the stored image type. SVG responses include a sandbox Content-Security-Policy. Cache-Control is public, max-age=3600, so replacing a file can stay cached for an hour. Admin resources return a ready-to-use url, so callers do not need to build this path.", "Asset", { "404": "No object is stored at this key." }));
 
   return {
     openapi: "3.1.0",
@@ -465,10 +475,17 @@ export function openapiDocument() {
     paths,
     components: {
       securitySchemes: {
-        bearerAuth: {
-          type: "http",
-          scheme: "bearer",
-          description: "Pages secret ADMIN_TOKEN. Send Authorization: Bearer <token>. Cloudflare Access is a separate gate and does not replace this header.",
+        cfAccessClientId: {
+          type: "apiKey",
+          in: "header",
+          name: "CF-Access-Client-Id",
+          description: "Cloudflare Access service token client id. Send it with CF-Access-Client-Secret. Browsers sign in through Access instead of these headers.",
+        },
+        cfAccessClientSecret: {
+          type: "apiKey",
+          in: "header",
+          name: "CF-Access-Client-Secret",
+          description: "Cloudflare Access service token client secret. Pair it with CF-Access-Client-Id.",
         },
       },
       schemas: {
@@ -522,7 +539,7 @@ function adminOperation(route: AdminRoute) {
     operationId: route.operationId,
     summary: route.summary,
     description: route.description,
-    security: [{ bearerAuth: [] }],
+    security: [{ cfAccessClientId: [], cfAccessClientSecret: [] }],
     parameters: parameters.length ? parameters : undefined,
     responses: responses(route.status, route.response),
   };
@@ -534,28 +551,49 @@ function adminOperation(route: AdminRoute) {
       content: Object.fromEntries(["image/jpeg", "image/png", "image/webp", "image/gif", "image/svg+xml"].map((type) => [type, { schema: { type: "string", format: "binary" } }])),
     };
   }
-  if (route.status === 201) {
+  if (route.status === 201 && route.operationId !== "uploadScreeningImage") {
     const created = operation.responses as Record<string, { headers?: unknown }>;
     created[String(route.status)].headers = { Location: { schema: { type: "string" }, description: "URL of the created resource." } };
+  }
+  if (route.operationId === "uploadScreeningImage") {
+    const uploadResponses = operation.responses as Record<string, unknown>;
+    uploadResponses["413"] = errorResponse("The image is larger than 8 MiB.");
+    uploadResponses["415"] = errorResponse("Content-Type is not an allowed image type.");
   }
   return compact(operation);
 }
 
-function publicOperation(operationId: string, summary: string, description: string, response: string) {
+function publicOperation(operationId: string, summary: string, description: string, response: string, errors: Record<string, string> = {}) {
   const tag = operationId === "getApiIndex" || operationId === "getOpenApi" ? "Discovery" : "Voting";
-  return compact({ tags: [tag], operationId, summary, description, responses: responses(200, response, operationId === "getAsset") });
+  const success = operationId === "getAsset"
+    ? { description: "Image bytes with the stored Content-Type.", content: { "application/octet-stream": { schema: { type: "string", format: "binary" } } } }
+    : { description: "Success.", content: { "application/json": { schema: { $ref: `#/components/schemas/${response}` } } } };
+  return compact({
+    tags: [tag],
+    operationId,
+    summary,
+    description,
+    responses: {
+      "200": success,
+      ...Object.fromEntries(Object.entries(errors).map(([status, text]) => [status, operationId === "getAsset"
+        ? { description: text, content: { "text/plain": { schema: { type: "string" } } } }
+        : errorResponse(text)])),
+    },
+  });
 }
 
-function responses(status: number, schema: string, binary = false) {
-  const success = binary
-    ? { description: "Image bytes.", content: { "application/octet-stream": { schema: { type: "string", format: "binary" } } } }
-    : { description: "Success.", content: { "application/json": { schema: { $ref: `#/components/schemas/${schema}` } } } };
+function errorResponse(description: string) {
+  return { description, content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } };
+}
+
+function responses(status: number, schema: string) {
   return {
-    [String(status)]: success,
-    "400": { description: "The request is invalid. fields names each problem.", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
-    "401": { description: "Missing or wrong admin bearer token.", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
-    "404": { description: "No resource at this URL.", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
-    "409": { description: "The slug or vote code conflicts with an existing record.", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
+    [String(status)]: { description: "Success.", content: { "application/json": { schema: { $ref: `#/components/schemas/${schema}` } } } },
+    "400": errorResponse("The request is invalid. fields names each problem."),
+    "401": errorResponse("Cloudflare Access did not authorize this request."),
+    "404": errorResponse("No resource at this URL."),
+    "405": errorResponse("This method is not allowed on this path."),
+    "409": errorResponse("The slug or vote code conflicts with an existing record."),
   };
 }
 

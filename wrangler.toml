@@ -2,6 +2,10 @@ name = "vote-sandiego48-com"
 compatibility_date = "2025-04-01"
 pages_build_output_dir = "dist"
 
+[vars]
+ACCESS_TEAM_DOMAIN = "https://kilna.cloudflareaccess.com"
+ACCESS_AUD = "cb94a9f99e4d085bf79b0d2a56060f395d56c56cf264eebc8182f5cc42b22b11,0eb602488e9900b4a156d005eb7145653a1a6c9ddf9c04fdf16e046db2965d5a"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "vote-sandiego48-com"

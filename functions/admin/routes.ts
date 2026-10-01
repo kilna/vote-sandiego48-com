@@ -1,3 +1,4 @@
+import { authorizeAdmin } from "../access";
 import { assetUrl } from "../assets";
 import { hashCode, normalizeCode } from "../codes";
 import type { Env } from "../types";
@@ -11,12 +12,9 @@ type Media = Env["MEDIA"] & {
   list(options?: { prefix?: string; cursor?: string }): Promise<{ objects: { key: string }[]; truncated: boolean; cursor?: string }>;
 };
 
-function authorized(request: Request, env: Env) {
-  return !!env.ADMIN_TOKEN && request.headers.get("Authorization") === `Bearer ${env.ADMIN_TOKEN}`;
-}
-
 export async function handleAdmin(request: Request, env: Env, parts: string[]) {
-  if (!authorized(request, env)) return error(401, "Unauthorized. Send Authorization: Bearer with the admin token.");
+  const denied = await authorizeAdmin(request, env);
+  if (denied) return denied;
   const matched = matchAdminRoute(request.method, parts);
   if (!matched.ok) {
     if (matched.status === 405) return error(405, "Method not allowed.", { allow: matched.allow }, { Allow: matched.allow.join(", ") });

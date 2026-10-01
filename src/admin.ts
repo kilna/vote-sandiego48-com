@@ -18,7 +18,6 @@ type Summary = Omit<Screening, "polls" | "links"> & { links: { ballot: string } 
 type CodeCounts = { total: number; used: number; unused: number };
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
-const tokenKey = "sd48-admin-token";
 const noticeKey = "sd48-admin-notice";
 const imageAccept = "image/jpeg,image/png,image/webp,image/gif,image/svg+xml";
 let message = "";
@@ -67,9 +66,8 @@ function showMessage(text: string, error = false) {
 
 function fail(err: unknown) {
   if (err instanceof ApiError && err.status === 401) {
-    sessionStorage.removeItem(tokenKey);
     note(err.message, true);
-    tokenScreen();
+    accessScreen();
     return;
   }
   showMessage(err instanceof Error ? err.message : "Something went wrong.", true);
@@ -77,7 +75,6 @@ function fail(err: unknown) {
 
 async function render() {
   const gen = ++generation;
-  if (!sessionStorage.getItem(tokenKey)) { tokenScreen(); return; }
   const path = location.pathname.replace(/\/$/, "") || "/admin";
   try {
     if (path === "/admin") await listScreen(gen);
@@ -99,28 +96,15 @@ function brandHeader() {
 }
 
 function shell(title: string, body: string) {
-  return `${brandHeader()}<main><section class="intro"><span class="kicker">Admin</span><h1>${esc(title)}</h1><p class="admin-links"><a href="/admin">All screenings</a> · <a href="/api/openapi.json">API reference</a> · <button type="button" class="text-button" id="forget-token">Forget token</button></p><p id="admin-message" class="message${messageError ? " error" : message ? " success" : ""}" role="status">${esc(message)}</p></section>${body}</main>`;
+  return `${brandHeader()}<main><section class="intro"><span class="kicker">Admin</span><h1>${esc(title)}</h1><p class="admin-links"><a href="/admin">All screenings</a> · <a href="/api/openapi.json">API reference</a></p><p id="admin-message" class="message${messageError ? " error" : message ? " success" : ""}" role="status">${esc(message)}</p></section>${body}</main>`;
 }
 
 function paint(html: string) {
   app.innerHTML = html;
-  document.querySelector("#forget-token")?.addEventListener("click", () => {
-    sessionStorage.removeItem(tokenKey);
-    note("");
-    tokenScreen();
-  });
 }
 
-function tokenScreen() {
-  app.innerHTML = `${brandHeader()}<main class="home"><section class="intro"><span class="kicker">Admin</span><h1>Admin token</h1><p>This editor creates and edits screenings through the admin API. The token is sent as <code>Authorization: Bearer</code>.</p></section><form id="token-form" class="token-form"><div class="callout"><label class="code-label">Admin token<input id="admin-token" type="password" autocomplete="off" required /></label><button class="button primary" type="submit">Continue <span>→</span></button></div><p id="admin-message" class="message${messageError ? " error" : ""}" role="status">${esc(message)}</p></form></main>`;
-  document.querySelector<HTMLFormElement>("#token-form")!.addEventListener("submit", (event) => {
-    event.preventDefault();
-    const token = document.querySelector<HTMLInputElement>("#admin-token")!.value.trim();
-    if (!token) return;
-    sessionStorage.setItem(tokenKey, token);
-    note("");
-    void render();
-  });
+function accessScreen() {
+  app.innerHTML = `${brandHeader()}<main class="home"><section class="intro"><span class="kicker">Admin</span><h1>Cloudflare Access</h1><p>Sign in with a @kilna.com address or sandiego@48hourfilm.com.</p><p><a class="button primary" href="/admin">Try again</a></p><p id="admin-message" class="message${messageError ? " error" : ""}" role="status">${esc(message)}</p></section></main>`;
 }
 
 function missing() {
@@ -129,13 +113,13 @@ function missing() {
 
 async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
-  headers.set("Authorization", `Bearer ${sessionStorage.getItem(tokenKey) || ""}`);
   if (typeof init.body === "string" && !headers.has("content-type")) headers.set("content-type", "application/json");
-  const response = await fetch(path, { ...init, headers });
+  const response = await fetch(path, { ...init, headers, credentials: "same-origin" });
   const text = await response.text();
   let data: { error?: string; fields?: Record<string, string> } = {};
   if (text) {
-    try { data = JSON.parse(text) as typeof data; } catch { data = { error: text }; }
+    try { data = JSON.parse(text) as typeof data; }
+    catch { throw new ApiError("The admin API did not return JSON.", response.status); }
   }
   if (!response.ok) {
     const fields = data.fields ? Object.entries(data.fields).map(([key, value]) => `${key}: ${value}`).join(" ") : "";

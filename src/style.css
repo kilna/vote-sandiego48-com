@@ -60,11 +60,8 @@ a:hover { color: var(--48-purple); }
   overflow: hidden;
   display: flex;
   justify-content: center;
-  padding: clamp(0.65rem, 2vw, 1rem) 1.25rem 0.9rem;
-  background:
-    linear-gradient(90deg, rgb(0 0 0 / 0.88) 0%, rgb(0 0 0 / 0.15) 46%, rgb(0 0 0 / 0.15) 54%, rgb(0 0 0 / 0.88) 100%),
-    radial-gradient(ellipse at center, var(--48-purple) 0%, var(--48-purple-dark) 42%, var(--48-black) 100%);
-  box-shadow: inset 0 0 2.5rem var(--48-black);
+  padding: clamp(0.75rem, 2vw, 1.15rem) 1.25rem;
+  background: var(--48-orange-halftone);
 }
 
 .masthead::before {
@@ -73,13 +70,12 @@ a:hover { color: var(--48-purple); }
   inset: -85%;
   z-index: 0;
   pointer-events: none;
-  background-image: radial-gradient(circle, var(--48-halftone-dot-on-dark) var(--48-halftone-dot-size), transparent calc(var(--48-halftone-dot-size) + 1px));
+  background-image: radial-gradient(circle, var(--48-halftone-dot) var(--48-halftone-dot-size), transparent calc(var(--48-halftone-dot-size) + 1px));
   background-size: var(--48-halftone-spacing) var(--48-halftone-spacing);
   transform: rotate(var(--48-halftone-angle));
-  mix-blend-mode: soft-light;
+  mix-blend-mode: multiply;
 }
 
-.masthead:not(.has-hero)::after,
 .screening-banner::after {
   content: "";
   position: absolute;
@@ -96,23 +92,18 @@ a:hover { color: var(--48-purple); }
   z-index: 1;
   display: block;
   width: min(22rem, 78%);
-  padding: 0.4rem 0.7rem 0.3rem;
-  border-radius: 0.85rem;
-  background: var(--48-white);
   line-height: 0;
-  box-shadow: 0 0.28rem 0 var(--48-gold), 0 0.7rem 1.1rem rgb(0 0 0 / 0.4);
 }
 
 .logo-link:focus-visible {
-  outline: 3px solid var(--48-orange);
-  outline-offset: 6px;
+  outline: 3px solid var(--48-navy);
+  outline-offset: 4px;
 }
 
 .logo {
   display: block;
   width: 100%;
   height: auto;
-  filter: none;
 }
 
 .screening-banner {
@@ -491,38 +482,11 @@ input:not([type="radio"]):not([type="checkbox"]):focus-visible {
 .admin-card .message { color: var(--48-yellow); }
 .admin-card .message.error { color: var(--48-pink); }
 
-.token-form {
-  display: grid;
-  gap: 1rem;
-  max-width: 36rem;
-  margin-inline: auto;
-}
-
-.token-form .callout .button { justify-self: stretch; }
-
 .admin-links {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem 0.8rem;
   align-items: center;
-}
-
-.text-button {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--48-navy);
-  font: inherit;
-  font-weight: 700;
-  text-decoration: underline 2px var(--48-black);
-  cursor: pointer;
-}
-
-.text-button:hover { color: var(--48-purple); }
-
-.text-button:focus-visible {
-  outline: 3px solid var(--48-navy);
-  outline-offset: 3px;
 }
 
 .stack, .poll-block { display: grid; gap: 0.9rem; }
