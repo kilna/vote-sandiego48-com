@@ -1,0 +1,121 @@
+import { assetUrl } from "../assets";
+
+export type ScreeningRow = {
+  id: string;
+  slug: string;
+  title: string;
+  venue: string | null;
+  banner_image_key: string | null;
+  timezone: string;
+  start_at: string;
+  stop_at: string;
+};
+
+export type PollRow = {
+  id: string;
+  screening_id: string;
+  slug: string;
+  title: string;
+  instructions: string | null;
+  min_selections: number;
+  max_selections: number;
+  image_config: string;
+  sort_order: number;
+};
+
+export type OptionRow = {
+  id: string;
+  poll_id: string;
+  title: string;
+  description: string | null;
+  image_keys: string;
+  sort_order: number;
+};
+
+export type ImageConfig = { aspectRatio: string; min: number; max: number; cycle?: boolean };
+
+export function parseKeys(raw: string | null) {
+  try {
+    const value = JSON.parse(raw || "[]") as unknown;
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+export function parseImageConfig(raw: string | null): ImageConfig {
+  try {
+    const value = JSON.parse(raw || "{}") as Partial<ImageConfig> | null;
+    if (value && typeof value === "object" && typeof value.aspectRatio === "string") {
+      return {
+        aspectRatio: value.aspectRatio,
+        min: Number(value.min ?? 1),
+        max: Number(value.max ?? 1),
+        cycle: Boolean(value.cycle),
+      };
+    }
+  } catch {
+    /* Fall through to the ballot default. */
+  }
+  return { aspectRatio: "16:9", min: 1, max: 1, cycle: false };
+}
+
+export function presentOption(row: OptionRow) {
+  const imageKeys = parseKeys(row.image_keys);
+  return {
+    id: row.id,
+    pollId: row.poll_id,
+    title: row.title,
+    description: row.description,
+    imageKeys,
+    images: imageKeys.map(assetUrl),
+    sortOrder: row.sort_order,
+  };
+}
+
+export function presentPoll(screeningSlug: string, row: PollRow, options: ReturnType<typeof presentOption>[]) {
+  const slug = encodeURIComponent(screeningSlug);
+  const pollSlug = encodeURIComponent(row.slug);
+  return {
+    id: row.id,
+    slug: row.slug,
+    title: row.title,
+    instructions: row.instructions,
+    minSelections: row.min_selections,
+    maxSelections: row.max_selections,
+    imageConfig: parseImageConfig(row.image_config),
+    sortOrder: row.sort_order,
+    options,
+    links: {
+      self: `/api/admin/screenings/${slug}/polls/${pollSlug}`,
+      options: `/api/admin/screenings/${slug}/polls/${pollSlug}/options`,
+    },
+  };
+}
+
+export function presentScreeningSummary(row: ScreeningRow) {
+  const slug = encodeURIComponent(row.slug);
+  return {
+    id: row.id,
+    slug: row.slug,
+    title: row.title,
+    venue: row.venue,
+    timezone: row.timezone,
+    startAt: row.start_at,
+    stopAt: row.stop_at,
+    bannerImageKey: row.banner_image_key,
+    bannerImage: row.banner_image_key ? assetUrl(row.banner_image_key) : null,
+    links: {
+      self: `/api/admin/screenings/${slug}`,
+      polls: `/api/admin/screenings/${slug}/polls`,
+      images: `/api/admin/screenings/${slug}/images`,
+      codes: `/api/admin/screenings/${slug}/codes`,
+      public: `/api/screenings/${slug}`,
+      ballot: `/s/${slug}`,
+    },
+  };
+}
+
+export function presentScreening(row: ScreeningRow, polls: ReturnType<typeof presentPoll>[]) {
+  return { ...presentScreeningSummary(row), polls };
+}

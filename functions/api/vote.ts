@@ -1,10 +1,9 @@
+import { hashCode } from "../codes";
 import type { Env } from "../types";
-const encoder = new TextEncoder();
-async function hash(value: string) { const digest = await crypto.subtle.digest("SHA-256", encoder.encode(value.trim().toUpperCase())); return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, "0")).join(""); }
 export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   const body = await request.json<{ screeningId: string; code: string; selections: Record<string, string[]> }>().catch(() => null);
   if (!body?.screeningId || !body.code || !body.selections) return Response.json({ error: "screeningId, code, and selections are required" }, { status: 400 });
-  const codeHash = await hash(body.code);
+  const codeHash = await hashCode(body.code);
   const codeRow = await env.DB.prepare("SELECT * FROM vote_codes WHERE code_hash = ? AND screening_id = ?").bind(codeHash, body.screeningId).first<any>();
   if (!codeRow) return Response.json({ error: "Invalid vote code" }, { status: 403 });
   if (codeRow.used_at) return Response.json({ error: "This vote code has already been used" }, { status: 409 });

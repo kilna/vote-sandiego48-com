@@ -10,13 +10,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
-  "dependencies": {
-    "fflate": "^0.8.2",
-    "js-yaml": "^4.1.0"
-  },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260930.2",
-    "@types/js-yaml": "^4.0.9",
     "@types/node": "^26.6.3",
     "typescript": "^5.8.3",
     "vite": "^6.3.5",
