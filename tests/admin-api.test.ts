@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { keyBelongs, safeFilename } from "../functions/admin/images";
 import { presentOption, presentPoll, presentScreening } from "../functions/admin/present";
-import { adminIndex, adminPath, adminRoutes, examples, matchAdminRoute, openapiDocument, optionWrite, pollPatch, pollWrite, publicIndex, screeningPatch, screeningWrite, validateObject, voteCodesWrite } from "../functions/api/schema";
+import { normalizeCode, randomCode } from "../functions/codes";
+import { adminIndex, adminPath, adminRoutes, examples, matchAdminRoute, openapiDocument, optionWrite, pollPatch, pollWrite, publicIndex, screeningPatch, screeningWrite, validateObject, voteCodeGenerate } from "../functions/api/schema";
 
 describe("admin api contract", () => {
   it("publishes every admin route in the OpenAPI document", () => {
@@ -22,7 +23,7 @@ describe("admin api contract", () => {
     expect(validateObject(screeningWrite, examples.screeningCreate, "create").ok).toBe(true);
     expect(validateObject(pollWrite, examples.pollCreate, "create").ok).toBe(true);
     expect(validateObject(optionWrite, examples.optionCreate, "create").ok).toBe(true);
-    expect(validateObject(voteCodesWrite, examples.codes, "create").ok).toBe(true);
+    expect(validateObject(voteCodeGenerate, examples.codes, "create").ok).toBe(true);
   });
 
   it("names invalid fields", () => {
@@ -42,6 +43,10 @@ describe("admin api contract", () => {
     expect(selections.ok).toBe(false);
     const stills = validateObject(pollWrite, { ...examples.pollCreate, imageConfig: { aspectRatio: "16:9", min: 3, max: 1 } }, "create");
     expect(stills.ok).toBe(false);
+    const count = validateObject(voteCodeGenerate, { count: 0 }, "create");
+    expect(count.ok).toBe(false);
+    const pasted = validateObject(voteCodeGenerate, { codes: ["TEST-1001"] }, "create");
+    expect(pasted.ok).toBe(false);
   });
 
   it("matches admin routes and rejects unknown methods", () => {
@@ -86,5 +91,14 @@ describe("admin api contract", () => {
     expect(keyBelongs("screening", "screening/banner.svg")).toBe(true);
     expect(keyBelongs("screening", "other/banner.svg")).toBe(false);
     expect(keyBelongs("screening", "screening/../other.svg")).toBe(false);
+  });
+
+  it("generates ticket codes that ignore spaces and hyphens when typed", () => {
+    const codes = new Set<string>();
+    for (let index = 0; index < 200; index += 1) codes.add(randomCode());
+    expect(codes.size).toBe(200);
+    for (const code of codes) expect(code).toMatch(/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{4}-[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{4}$/);
+    expect(normalizeCode(" k7np-4qwm ")).toBe("K7NP4QWM");
+    expect(normalizeCode("K7NP4QWM")).toBe(normalizeCode("K7NP-4QWM"));
   });
 });

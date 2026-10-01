@@ -15,7 +15,8 @@ type Screening = {
   links: { ballot: string };
 };
 type Summary = Omit<Screening, "polls" | "links"> & { links: { ballot: string } };
-type CodeCounts = { total: number; used: number; unused: number };
+type VoteCode = { code: string; used: boolean };
+type CodeList = { total: number; used: number; unused: number; unlisted: number; codes: VoteCode[] };
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 const noticeKey = "sd48-admin-notice";
@@ -193,7 +194,7 @@ async function editScreen(gen: number, slug: string) {
   paint(shell("Screening", "<p>Loading…</p>"));
   const [screening, counts] = await Promise.all([
     api<Screening>(`/api/admin/screenings/${encodeURIComponent(slug)}`),
-    api<CodeCounts>(`/api/admin/screenings/${encodeURIComponent(slug)}/codes`),
+    api<CodeList>(`/api/admin/screenings/${encodeURIComponent(slug)}/codes`),
   ]);
   if (gen !== generation) return;
   paint(shell(screening.title, editBody(screening, counts)));
@@ -209,19 +210,20 @@ async function editScreen(gen: number, slug: string) {
   bindCodes(screening);
 }
 
-function editBody(screening: Screening, counts: CodeCounts) {
+function editBody(screening: Screening, counts: CodeList) {
   const polls = screening.polls.map((poll) => pollBlock(poll)).join("") || "<p>No polls yet.</p>";
   return `<p><a href="${esc(screening.links.ballot)}">Ballot page</a> · <a href="/api/screenings/${encodeURIComponent(screening.slug)}">Public JSON</a></p>
     <form id="screening-form" class="editor"><h2>Screening</h2>${screeningFields(screening)}<div class="admin-actions"><button class="button primary" type="submit">Save screening</button><button class="button danger" type="button" id="delete-screening">Delete screening</button></div></form>
     <section class="editor"><h2>Banner</h2>${screening.bannerImage ? `<img class="banner-preview" alt="" src="${esc(screening.bannerImage)}">` : "<p>No banner yet.</p>"}<label>Image file<input id="banner-file" type="file" accept="${imageAccept}"></label><div class="admin-actions"><button class="button secondary" type="button" id="upload-banner">Upload banner</button>${screening.bannerImageKey ? `<button class="button danger" type="button" id="clear-banner">Remove banner</button>` : ""}</div><p class="help">Filenames use letters, numbers, dots, hyphens, and underscores. Uploading the same name replaces that file.</p></section>
     <h2 class="section-title">Polls</h2>${polls}
     <form id="new-poll" class="editor"><h2>New poll</h2>${pollFields(null)}<div class="admin-actions"><button class="button primary" type="submit">Add poll</button></div></form>
-    <section class="editor"><h2>Vote codes</h2><p>${counts.total} total · ${counts.unused} unused · ${counts.used} used</p><p class="help">Codes are stored as hashes and cannot be listed later. Add or remove the text printed on the ticket. Letters are not case-sensitive. A used code stays until its vote is no longer needed; removal does not delete votes.</p><form id="codes-form"><label>Codes, one per line<textarea name="codes" rows="6"></textarea></label><div class="admin-actions"><button class="button primary" type="submit">Add codes</button><button class="button danger" type="button" id="remove-codes">Remove codes</button></div></form></section>`;
+    <section class="editor"><h2>Vote codes</h2><p>${counts.total} total · ${counts.unused} unused · ${counts.used} used</p><p class="help">Generate the codes that go on the tickets, then download the file. Each code works once. The file lists every code and whether it has already been used. Typing ignores spaces and hyphens.</p>${counts.unlisted ? `<p class="help">${counts.unlisted} older ${counts.unlisted === 1 ? "code was" : "codes were"} saved before downloads existed. ${counts.unlisted === 1 ? "It still works" : "They still work"} and ${counts.unlisted === 1 ? "is" : "are"} not in the file.</p>` : ""}<form id="codes-form"><label class="codes-count">How many<input name="count" type="number" min="1" max="500" required></label><div class="admin-actions"><button class="button primary" type="submit">Generate codes</button><button class="button secondary" type="button" id="download-codes">Download codes</button>${counts.unused ? `<button class="button danger" type="button" id="remove-codes">Remove unused codes</button>` : ""}</div></form></section>`;
 }
 
 function pollBlock(poll: Poll) {
-  const options = poll.options.map((option) => optionForm(poll, option)).join("") || "<p>No options yet.</p>";
-  return `<article class="poll-block"><form id="poll-${poll.id}" class="editor poll-form"><h2>${esc(poll.title)}</h2>${pollFields(poll)}<div class="admin-actions"><button class="button primary" type="submit">Save poll</button><button class="button danger" type="button" data-delete-poll="${esc(poll.slug)}">Delete poll</button></div></form><h3 class="section-title">Options</h3>${options}${optionForm(poll, null)}</article>`;
+  const options = poll.options.map((option) => optionForm(poll, option)).join("");
+  const empty = options ? "" : `<p class="help">No options yet.</p>`;
+  return `<article class="editor poll-block"><form id="poll-${poll.id}" class="poll-form"><h2>${esc(poll.title)}</h2>${pollFields(poll)}<div class="admin-actions"><button class="button primary" type="submit">Save poll</button><button class="button danger" type="button" data-delete-poll="${esc(poll.slug)}">Delete poll</button></div></form><section class="poll-options"><h3>Options</h3>${empty}${options}${optionForm(poll, null)}</section></article>`;
 }
 
 function pollFields(poll: Poll | null) {
@@ -232,7 +234,7 @@ function pollFields(poll: Poll | null) {
 function optionForm(poll: Poll, option: Option | null) {
   const id = option ? `option-${option.id}` : `new-option-${poll.id}`;
   const thumbs = option ? option.imageKeys.map((key, index) => `<figure data-image-key="${esc(key)}"><img alt="" src="${esc(option.images[index] || "")}"><button type="button" data-remove-image="${esc(key)}">Remove image</button></figure>`).join("") : "";
-  return `<form id="${id}" class="editor option-editor" data-option-id="${esc(option?.id || "")}"><h3>${option ? esc(option.title) : "New option"}</h3><div class="field-row"><label>Title<input name="title" required maxlength="200" value="${esc(option?.title || "")}"></label><label>Sort order<input name="sortOrder" type="number" min="0" value="${option?.sortOrder ?? ""}"></label></div><label>Description<input name="description" maxlength="2000" value="${esc(option?.description || "")}"></label>${option ? `<div class="thumbs">${thumbs}</div>` : ""}<label>${option ? "Add an image" : "Image"}<input name="file" type="file" accept="${imageAccept}"></label><div class="admin-actions"><button class="button primary" type="submit">${option ? "Save option" : "Add option"}</button>${option ? `<button class="button danger" type="button" data-delete-option="${esc(option.id)}">Delete option</button>` : ""}</div></form>`;
+  return `<form id="${id}" class="option-editor" data-option-id="${esc(option?.id || "")}"><h3>${option ? esc(option.title) : "New option"}</h3><div class="field-row"><label>Title<input name="title" required maxlength="200" value="${esc(option?.title || "")}"></label><label>Sort order<input name="sortOrder" type="number" min="0" value="${option?.sortOrder ?? ""}"></label></div><label>Description<input name="description" maxlength="2000" value="${esc(option?.description || "")}"></label>${option ? `<div class="thumbs">${thumbs}</div>` : ""}<label>${option ? "Add an image" : "Image"}<input name="file" type="file" accept="${imageAccept}"></label><div class="admin-actions"><button class="button primary" type="submit">${option ? "Save option" : "Add option"}</button>${option ? `<button class="button danger" type="button" data-delete-option="${esc(option.id)}">Delete option</button>` : ""}</div></form>`;
 }
 
 function bindBanner(screening: Screening) {
@@ -375,20 +377,40 @@ function bindCodes(screening: Screening) {
   const form = document.querySelector<HTMLFormElement>("#codes-form")!;
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
-    await sendCodes(screening, form, "POST");
+    const count = Number(formValues(form).count);
+    try {
+      const result = await api<{ created: string[] }>(`/api/admin/screenings/${encodeURIComponent(screening.slug)}/codes`, { method: "POST", body: JSON.stringify({ count }) });
+      note(`Generated ${result.created.length} codes.`);
+      await render();
+    } catch (err) { fail(err); }
   });
-  document.querySelector("#remove-codes")!.addEventListener("click", () => void sendCodes(screening, form, "DELETE"));
+  document.querySelector("#download-codes")!.addEventListener("click", () => void downloadCodes(screening));
+  document.querySelector("#remove-codes")?.addEventListener("click", () => void removeUnusedCodes(screening));
 }
 
-async function sendCodes(screening: Screening, form: HTMLFormElement, method: "POST" | "DELETE") {
-  const codes = String(new FormData(form).get("codes") || "").split(/\s+/).map((code) => code.trim()).filter(Boolean);
-  if (!codes.length) { showMessage("Enter at least one code.", true); return; }
+async function downloadCodes(screening: Screening) {
   try {
-    const result = await api<{ created?: string[]; alreadyPresent?: string[]; deleted?: string[]; used?: string[]; missing?: string[] }>(`/api/admin/screenings/${encodeURIComponent(screening.slug)}/codes`, { method, body: JSON.stringify({ codes }) });
-    const text = method === "POST"
-      ? `Added ${result.created?.length || 0}. Already on this screening: ${result.alreadyPresent?.length || 0}.`
-      : `Removed ${result.deleted?.length || 0}. Used and kept: ${result.used?.length || 0}. Not on this screening: ${result.missing?.length || 0}.`;
-    note(text);
+    const list = await api<CodeList>(`/api/admin/screenings/${encodeURIComponent(screening.slug)}/codes`);
+    if (!list.codes.length) { showMessage("There are no codes to download.", true); return; }
+    const lines = ["code,used", ...list.codes.map((item) => `${item.code},${item.used ? "yes" : "no"}`)];
+    const url = URL.createObjectURL(new Blob([`${lines.join("\n")}\n`], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${screening.slug}-vote-codes.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    const older = list.unlisted ? ` ${list.unlisted} older ${list.unlisted === 1 ? "code is" : "codes are"} not in the file.` : "";
+    showMessage(`Downloaded ${list.codes.length} codes.${older}`);
+  } catch (err) { fail(err); }
+}
+
+async function removeUnusedCodes(screening: Screening) {
+  if (!confirm("Remove every unused code? Used codes stay, and votes are not deleted.")) return;
+  try {
+    const result = await api<{ deleted: number }>(`/api/admin/screenings/${encodeURIComponent(screening.slug)}/codes`, { method: "DELETE" });
+    note(`Removed ${result.deleted} unused codes.`);
     await render();
   } catch (err) { fail(err); }
 }

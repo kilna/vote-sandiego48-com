@@ -1,11 +1,11 @@
 import { authorizeAdmin } from "../access";
 import { assetUrl } from "../assets";
-import { hashCode, normalizeCode } from "../codes";
+import { hashCode, randomCode } from "../codes";
 import type { Env } from "../types";
 import { error, json } from "../api/http";
 import { imageContentType, imageKey, keyBelongs, MAX_IMAGE_BYTES, safeFilename } from "./images";
 import { presentOption, presentPoll, presentScreening, presentScreeningSummary, type OptionRow, type PollRow, type ScreeningRow } from "./present";
-import { adminIndex, matchAdminRoute, optionPatch, optionWrite, pollPatch, pollWrite, screeningPatch, screeningWrite, validateObject, voteCodesWrite } from "../api/schema";
+import { adminIndex, matchAdminRoute, optionPatch, optionWrite, pollPatch, pollWrite, screeningPatch, screeningWrite, validateObject, voteCodeGenerate } from "../api/schema";
 
 type Media = Env["MEDIA"] & {
   delete(keys: string | string[]): Promise<void>;
@@ -39,9 +39,9 @@ export async function handleAdmin(request: Request, env: Env, parts: string[]) {
     case "updateOption": return updateOption(request, env, params.slug, params.pollSlug, params.optionId);
     case "deleteOption": return deleteOption(env, params.slug, params.pollSlug, params.optionId);
     case "uploadScreeningImage": return uploadImage(request, env, params.slug);
-    case "getVoteCodes": return codeCounts(env, params.slug);
-    case "addVoteCodes": return addCodes(request, env, params.slug);
-    case "deleteVoteCodes": return deleteCodes(request, env, params.slug);
+    case "getVoteCodes": return listCodes(env, params.slug);
+    case "generateVoteCodes": return generateCodes(request, env, params.slug);
+    case "deleteVoteCodes": return deleteUnusedCodes(env, params.slug);
     default: return error(500, "This admin route is not implemented.");
   }
 }
@@ -386,65 +386,71 @@ async function uploadImage(request: Request, env: Env, slug: string) {
   return json({ key, contentType, url: assetUrl(key), links: { screening: summary.links.self } }, 201);
 }
 
-async function codeCounts(env: Env, slug: string) {
+async function listCodes(env: Env, slug: string) {
   const found = await requireScreening(env, slug);
   if ("response" in found) return found.response;
-  const row = await env.DB.prepare("SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN used_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS used FROM vote_codes WHERE screening_id = ?").bind(found.row.id).first<{ total: number; used: number }>();
+  return json(await codeList(env, found.row.id));
+}
+
+async function generateCodes(request: Request, env: Env, slug: string) {
+  const found = await requireScreening(env, slug);
+  if ("response" in found) return found.response;
+  const body = await readBody(request);
+  if ("response" in body) return body.response;
+  const parsed = validateObject(voteCodeGenerate, body.value, "create");
+  if (!parsed.ok) return invalid(parsed.fields);
+  const count = parsed.value.count as number;
+  const pending: { code: string; hash: string }[] = [];
+  const seen = new Set<string>();
+  let rounds = 0;
+  while (pending.length < count) {
+    if (++rounds > 20) return error(500, "Could not generate enough unique codes.");
+    const batch: { code: string; hash: string }[] = [];
+    while (pending.length + batch.length < count && batch.length < 80) {
+      const code = randomCode();
+      if (seen.has(code)) continue;
+      seen.add(code);
+      batch.push({ code, hash: await hashCode(code) });
+    }
+    const taken = await takenHashes(env, batch.map((item) => item.hash));
+    for (const item of batch) if (!taken.has(item.hash)) pending.push(item);
+  }
+  try {
+    await env.DB.batch(pending.map((item) => env.DB.prepare("INSERT INTO vote_codes (code_hash, screening_id, code) VALUES (?, ?, ?)").bind(item.hash, found.row.id, item.code)));
+  } catch (err) {
+    if (isUnique(err)) return error(409, "A generated code collided with an existing code. Try again.");
+    throw err;
+  }
+  const summary = await codeList(env, found.row.id);
+  return json({ created: pending.map((item) => item.code), total: summary.total, used: summary.used, unused: summary.unused });
+}
+
+async function deleteUnusedCodes(env: Env, slug: string) {
+  const found = await requireScreening(env, slug);
+  if ("response" in found) return found.response;
+  const summary = await codeList(env, found.row.id);
+  const removed = await env.DB.prepare("DELETE FROM vote_codes WHERE screening_id = ? AND used_at IS NULL").bind(found.row.id).run() as { meta?: { changes?: number } };
+  return json({ deleted: Number(removed.meta?.changes ?? summary.unused), used: summary.used });
+}
+
+async function codeList(env: Env, screeningId: string) {
+  const row = await env.DB.prepare("SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN used_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS used, COALESCE(SUM(CASE WHEN code IS NULL OR code = '' THEN 1 ELSE 0 END), 0) AS unlisted FROM vote_codes WHERE screening_id = ?").bind(screeningId).first<{ total: number; used: number; unlisted: number }>();
   const total = Number(row?.total || 0);
   const used = Number(row?.used || 0);
-  return json({ total, used, unused: total - used });
+  const unlisted = Number(row?.unlisted || 0);
+  const listed = await env.DB.prepare("SELECT code, used_at FROM vote_codes WHERE screening_id = ? AND code IS NOT NULL AND code != '' ORDER BY code").bind(screeningId).all<{ code: string; used_at: string | null }>();
+  return {
+    total,
+    used,
+    unused: total - used,
+    unlisted,
+    codes: (listed.results || []).map((item) => ({ code: item.code, used: item.used_at !== null })),
+  };
 }
 
-async function addCodes(request: Request, env: Env, slug: string) {
-  const found = await requireScreening(env, slug);
-  if ("response" in found) return found.response;
-  const parsed = await readCodes(request);
-  if ("response" in parsed) return parsed.response;
-  const created: string[] = [];
-  const alreadyPresent: string[] = [];
-  const conflicts: string[] = [];
-  const pending: { code: string; hash: string }[] = [];
-  for (const code of parsed.codes) {
-    const hash = await hashCode(code);
-    const existing = await env.DB.prepare("SELECT screening_id FROM vote_codes WHERE code_hash = ?").bind(hash).first<{ screening_id: string }>();
-    if (!existing) pending.push({ code, hash });
-    else if (existing.screening_id === found.row.id) alreadyPresent.push(code);
-    else conflicts.push(code);
-  }
-  if (conflicts.length) return error(409, "Some codes already belong to another screening. Nothing was stored.", { conflicts });
-  if (pending.length) {
-    await env.DB.batch(pending.map((item) => env.DB.prepare("INSERT OR IGNORE INTO vote_codes (code_hash, screening_id) VALUES (?, ?)").bind(item.hash, found.row.id)));
-    created.push(...pending.map((item) => item.code));
-  }
-  return json({ created, alreadyPresent });
-}
-
-async function deleteCodes(request: Request, env: Env, slug: string) {
-  const found = await requireScreening(env, slug);
-  if ("response" in found) return found.response;
-  const parsed = await readCodes(request);
-  if ("response" in parsed) return parsed.response;
-  const deleted: string[] = [];
-  const used: string[] = [];
-  const missing: string[] = [];
-  for (const code of parsed.codes) {
-    const hash = await hashCode(code);
-    const existing = await env.DB.prepare("SELECT screening_id, used_at FROM vote_codes WHERE code_hash = ?").bind(hash).first<{ screening_id: string; used_at: string | null }>();
-    if (!existing || existing.screening_id !== found.row.id) missing.push(code);
-    else if (existing.used_at) used.push(code);
-    else {
-      await env.DB.prepare("DELETE FROM vote_codes WHERE code_hash = ? AND screening_id = ? AND used_at IS NULL").bind(hash, found.row.id).run();
-      deleted.push(code);
-    }
-  }
-  return json({ deleted, used, missing });
-}
-
-async function readCodes(request: Request): Promise<Failure | { codes: string[] }> {
-  const body = await readBody(request);
-  if ("response" in body) return body;
-  const parsed = validateObject(voteCodesWrite, body.value, "create");
-  if (!parsed.ok) return { response: invalid(parsed.fields) };
-  const codes = [...new Set((parsed.value.codes as string[]).map((code) => normalizeCode(code)))];
-  return { codes };
+async function takenHashes(env: Env, hashes: string[]) {
+  if (!hashes.length) return new Set<string>();
+  const marks = hashes.map(() => "?").join(", ");
+  const rows = await env.DB.prepare(`SELECT code_hash FROM vote_codes WHERE code_hash IN (${marks})`).bind(...hashes).all<{ code_hash: string }>();
+  return new Set((rows.results || []).map((row) => row.code_hash));
 }

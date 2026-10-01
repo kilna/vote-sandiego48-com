@@ -489,9 +489,26 @@ input:not([type="radio"]):not([type="checkbox"]):focus-visible {
   align-items: center;
 }
 
-.stack, .poll-block { display: grid; gap: 0.9rem; }
+.stack { display: grid; gap: 0.9rem; }
 
-.poll-block { margin: 1rem 0; }
+.poll-block { gap: 1.15rem; margin: 1rem 0; }
+
+.poll-form, .option-editor { display: grid; gap: 0.85rem; }
+
+.poll-options {
+  display: grid;
+  gap: 0.75rem;
+  padding-top: 1rem;
+  border-top: 0.125rem solid var(--48-purple-nearwhite);
+}
+
+.option-editor {
+  margin: 0;
+  padding: 0.85rem 0.9rem 0.95rem;
+  border: 0.125rem solid var(--48-purple);
+  border-radius: 0.4rem;
+  background: var(--48-navy-nearwhite);
+}
 
 .section-title {
   margin: 1.4rem 0 0.4rem;
@@ -560,6 +577,8 @@ input:not([type="radio"]):not([type="checkbox"]):focus-visible {
   outline: 3px solid var(--48-orange);
   outline-offset: 2px;
 }
+
+.codes-count { max-width: 12rem; }
 
 .help {
   margin: 0;

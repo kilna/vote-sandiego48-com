@@ -3,7 +3,6 @@ const SLUG_MESSAGE = "Use lowercase letters, numbers, and single hyphens.";
 const TIMESTAMP = "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})$";
 const TIMESTAMP_MESSAGE = "Use an ISO 8601 timestamp with seconds and a timezone, such as 2026-05-01T18:00:00-07:00.";
 const RATIO = "^\\d+(?:\\.\\d+)?:\\d+(?:\\.\\d+)?$";
-const CODE = "^[A-Za-z0-9][A-Za-z0-9-]{0,63}$";
 
 type StringField = {
   type: "string";
@@ -147,10 +146,10 @@ export const optionPatch: ObjectSchema = {
   },
 };
 
-export const voteCodesWrite: ObjectSchema = {
-  description: "Plaintext vote codes. They are trimmed, uppercased, and stored as SHA-256 hashes. A code is unique across the whole site and cannot be read back.",
+export const voteCodeGenerate: ObjectSchema = {
+  description: "How many vote codes to create. The server chooses the codes. Each code is stored so it can be downloaded, and hashed for voting.",
   fields: {
-    codes: { type: "stringArray", required: true, description: "Ticket codes. Letters, numbers, and hyphens only. Comparison is case-insensitive.", example: ["TEST-1001", "TEST-1002"], minItems: 1, maxItems: 500, itemPattern: CODE, itemPatternMessage: "Use 1–64 letters, numbers, and hyphens." },
+    count: { type: "integer", required: true, description: "Number of new codes, from 1 to 500. Each code is eight letters or digits grouped as XXXX-XXXX. The alphabet omits 0, O, 1, I, and L. Spaces and hyphens are ignored when a voter types the code.", example: 25, minimum: 1, maximum: 500 },
   },
 };
 
@@ -178,7 +177,7 @@ export const examples = {
     imageKeys: ["00000000-0000-4000-8000-000000000000/orange-hour-1.jpg"],
     sortOrder: 0,
   },
-  codes: { codes: ["TEST-1001", "TEST-1002"] },
+  codes: { count: 25 },
 };
 
 function dateOrder(value: Record<string, unknown>): Record<string, string> {
@@ -289,13 +288,13 @@ const requestSchemas = {
   PollPatch: pollPatch,
   OptionWrite: optionWrite,
   OptionPatch: optionPatch,
-  VoteCodesWrite: voteCodesWrite,
+  VoteCodeGenerate: voteCodeGenerate,
 };
 
 export const adminRoutes: AdminRoute[] = [
   { method: "GET", parts: [], operationId: "getAdminIndex", summary: "Discover admin operations", description: "Start here after authenticating. Follow workflows.createScreening in order to publish a ballot without guessing field names.", response: "AdminIndex", status: 200 },
   { method: "GET", parts: ["screenings"], operationId: "listScreenings", summary: "List screenings", description: "Each item links to the screening, its polls, image upload, and vote codes.", response: "ScreeningList", status: 200 },
-  { method: "POST", parts: ["screenings"], operationId: "createScreening", summary: "Create a screening", description: "Create the screening, then upload images, add polls and options, and add vote codes. A duplicate slug returns 409.", body: "ScreeningWrite", response: "Screening", status: 201 },
+  { method: "POST", parts: ["screenings"], operationId: "createScreening", summary: "Create a screening", description: "Create the screening, then upload images, add polls and options, and generate vote codes. A duplicate slug returns 409.", body: "ScreeningWrite", response: "Screening", status: 201 },
   { method: "GET", parts: ["screenings", ":slug"], operationId: "getScreening", summary: "Read a screening", description: "Returns the screening with its polls and options.", response: "Screening", status: 200 },
   { method: "PATCH", parts: ["screenings", ":slug"], operationId: "updateScreening", summary: "Update a screening", description: "Changes only the fields you send. Set bannerImageKey to a key from uploadScreeningImage, or null to remove the banner.", body: "ScreeningPatch", response: "Screening", status: 200 },
   { method: "DELETE", parts: ["screenings", ":slug"], operationId: "deleteScreening", summary: "Delete a screening", description: "Deletes the screening, its polls, options, vote codes, and votes, then deletes images stored for that screening.", response: "Deleted", status: 200 },
@@ -310,9 +309,9 @@ export const adminRoutes: AdminRoute[] = [
   { method: "PATCH", parts: ["screenings", ":slug", "polls", ":pollSlug", "options", ":optionId"], operationId: "updateOption", summary: "Update an option", description: "Changes only the fields you send. imageKeys replaces the entire still list.", body: "OptionPatch", response: "Option", status: 200 },
   { method: "DELETE", parts: ["screenings", ":slug", "polls", ":pollSlug", "options", ":optionId"], operationId: "deleteOption", summary: "Delete an option", description: "Deletes the option and votes for it. Uploaded images stay in storage.", response: "Deleted", status: 200 },
   { method: "POST", parts: ["screenings", ":slug", "images"], operationId: "uploadScreeningImage", summary: "Upload an image", description: "Send the raw image bytes. Set Content-Type to an allowed image type and X-Filename to the basename. The response key is what you store as bannerImageKey or in imageKeys. Uploading the same filename again replaces the object.", response: "ImageCreated", status: 201 },
-  { method: "GET", parts: ["screenings", ":slug", "codes"], operationId: "getVoteCodes", summary: "Count vote codes", description: "Plaintext codes are not stored and cannot be listed. This returns how many codes exist, how many have voted, and how many are unused.", response: "CodeCounts", status: 200 },
-  { method: "POST", parts: ["screenings", ":slug", "codes"], operationId: "addVoteCodes", summary: "Add vote codes", description: "Hashes and stores new codes. Codes already on this screening are reported as alreadyPresent and are not duplicated. A code that belongs to another screening fails the whole request with 409 and stores nothing.", body: "VoteCodesWrite", response: "CodeAddResult", status: 200 },
-  { method: "DELETE", parts: ["screenings", ":slug", "codes"], operationId: "deleteVoteCodes", summary: "Delete unused vote codes", description: "Send the plaintext codes to remove. Codes that have already been used are left in place and listed in used. Deleting a code does not delete votes.", body: "VoteCodesWrite", response: "CodeDeleteResult", status: 200 },
+  { method: "GET", parts: ["screenings", ":slug", "codes"], operationId: "getVoteCodes", summary: "List vote codes", description: "Returns every code whose text was stored, in code order, plus counts. used on a code is true after that code has voted. unlisted counts older rows that still work but have no saved text, so they are omitted from codes.", response: "CodeList", status: 200 },
+  { method: "POST", parts: ["screenings", ":slug", "codes"], operationId: "generateVoteCodes", summary: "Generate vote codes", description: "Creates count new codes and returns them in created. A code is unique across the site. The text is stored for download. Voting compares a SHA-256 hash, and spaces and hyphens in what the voter types are ignored.", body: "VoteCodeGenerate", response: "CodeGenerateResult", status: 200 },
+  { method: "DELETE", parts: ["screenings", ":slug", "codes"], operationId: "deleteVoteCodes", summary: "Delete unused vote codes", description: "Removes every unused code for this screening. Send no body. Used codes stay, and votes are not deleted. deleted is how many rows were removed.", response: "CodeDeleteResult", status: 200 },
 ];
 
 export function adminPath(route: AdminRoute) {
@@ -367,7 +366,8 @@ export function adminIndex() {
         { step: "Attach the banner by patching bannerImageKey.", method: "PATCH", href: "/api/admin/screenings/{slug}", operationId: "updateScreening" },
         { step: "Add each poll.", method: "POST", href: "/api/admin/screenings/{slug}/polls", operationId: "createPoll" },
         { step: "Add each option. imageKeys are upload keys, not public URLs.", method: "POST", href: "/api/admin/screenings/{slug}/polls/{pollSlug}/options", operationId: "createOption" },
-        { step: "Add vote codes. They are hashed and cannot be read back.", method: "POST", href: "/api/admin/screenings/{slug}/codes", operationId: "addVoteCodes" },
+        { step: "Generate vote codes. Send count. created lists the new codes.", method: "POST", href: "/api/admin/screenings/{slug}/codes", operationId: "generateVoteCodes" },
+        { step: "Download every stored code, including ones generated earlier.", method: "GET", href: "/api/admin/screenings/{slug}/codes", operationId: "getVoteCodes" },
       ],
     },
   };
@@ -506,9 +506,43 @@ export function openapiDocument() {
         OptionList: { type: "object", required: ["options"], properties: { options: { type: "array", items: { $ref: "#/components/schemas/Option" } } } },
         Option: resourceSchema(["id", "pollId", "title", "description", "imageKeys", "images", "sortOrder"]),
         ImageCreated: resourceSchema(["key", "contentType", "url", "links"]),
-        CodeCounts: resourceSchema(["total", "used", "unused"]),
-        CodeAddResult: resourceSchema(["created", "alreadyPresent"]),
-        CodeDeleteResult: resourceSchema(["deleted", "used", "missing"]),
+        CodeList: {
+          type: "object",
+          required: ["total", "used", "unused", "unlisted", "codes"],
+          properties: {
+            total: { type: "integer", description: "Codes on this screening, including ones with no saved text." },
+            used: { type: "integer", description: "Codes that have already voted." },
+            unused: { type: "integer", description: "Codes that have not voted." },
+            unlisted: { type: "integer", description: "Older codes with no saved text. They still work and are omitted from codes." },
+            codes: { type: "array", items: { $ref: "#/components/schemas/VoteCode" } },
+          },
+        },
+        VoteCode: {
+          type: "object",
+          required: ["code", "used"],
+          properties: {
+            code: { type: "string", description: "Code to print on the ticket, grouped as XXXX-XXXX.", examples: ["K7NP-4QWM"] },
+            used: { type: "boolean", description: "True after this code has voted." },
+          },
+        },
+        CodeGenerateResult: {
+          type: "object",
+          required: ["created", "total", "used", "unused"],
+          properties: {
+            created: { type: "array", items: { type: "string" }, description: "Codes created by this request." },
+            total: { type: "integer" },
+            used: { type: "integer" },
+            unused: { type: "integer" },
+          },
+        },
+        CodeDeleteResult: {
+          type: "object",
+          required: ["deleted", "used"],
+          properties: {
+            deleted: { type: "integer", description: "Unused codes removed." },
+            used: { type: "integer", description: "Used codes left in place." },
+          },
+        },
         Deleted: { type: "object", required: ["deleted"], properties: { deleted: { type: "boolean" }, slug: { type: "string" }, id: { type: "string" } } },
         EnterRequest: { type: "object", required: ["code"], additionalProperties: false, properties: { code: { type: "string", description: "Vote code printed on the ticket. Leading and trailing spaces are ignored and letters are compared in uppercase.", examples: ["TEST-1001"] } } },
         EnterResult: { type: "object", required: ["slug", "title"], properties: { slug: { type: "string" }, title: { type: "string" }, error: { type: "string" } } },
@@ -598,7 +632,7 @@ function responses(status: number, schema: string) {
 }
 
 function jsonBody(schema: string, admin: boolean) {
-  const example = schema === "ScreeningWrite" ? examples.screeningCreate : schema === "PollWrite" ? examples.pollCreate : schema === "OptionWrite" ? examples.optionCreate : schema === "VoteCodesWrite" ? examples.codes : undefined;
+  const example = schema === "ScreeningWrite" ? examples.screeningCreate : schema === "PollWrite" ? examples.pollCreate : schema === "OptionWrite" ? examples.optionCreate : schema === "VoteCodeGenerate" ? examples.codes : undefined;
   return {
     required: true,
     content: { "application/json": compact({ schema: { $ref: `#/components/schemas/${schema}` }, example: admin ? example : undefined }) },
