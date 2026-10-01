@@ -207,9 +207,9 @@ function votingStatus(item: { voting: Voting; votingOpen: boolean }) {
 }
 
 function votingDetail(item: { voting: Voting }) {
-  if (item.voting === "open") return "Ballots are accepted until you stop voting or return to the schedule.";
-  if (item.voting === "closed") return "Ballots are rejected until you start voting or return to the schedule.";
-  return "Ballots are accepted only between this poll's open and close times.";
+  if (item.voting === "open") return "Picks are saved until you stop voting or return to the schedule.";
+  if (item.voting === "closed") return "Picks stay as they are until you start voting or return to the schedule.";
+  return "Picks are saved only between this poll's open and close times.";
 }
 
 function pollVoting(poll: Poll) {

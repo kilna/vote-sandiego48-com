@@ -181,17 +181,35 @@ main.home .gate {
 }
 
 .poll {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
   margin: 1.75rem 0 0;
   padding: 0;
   border: 0;
 }
 
-.poll legend {
+.poll-pin {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0.55rem 0 0.7rem;
+  background: linear-gradient(180deg, var(--48-white) 0%, var(--48-white) 78%, rgb(255 255 255 / 0.94) 100%);
+  box-shadow: 0 0.55rem 0.7rem -0.35rem rgb(9 45 72 / 0.16);
+}
+
+.poll-heading {
   display: flex;
   width: 100%;
   align-items: baseline;
   justify-content: space-between;
   gap: 0.75rem;
+  margin: 0;
   padding: 0;
   color: var(--48-navy);
   font-weight: 800;
@@ -199,8 +217,14 @@ main.home .gate {
 }
 
 .poll-title {
+  margin: 0;
   font-size: clamp(2.15rem, 5.5vw, 3.15rem);
   text-shadow: var(--halo);
+}
+
+.poll-pin .countdown,
+.poll-pin .window {
+  margin: 0;
 }
 
 .rule {
@@ -450,7 +474,18 @@ input:not([type="radio"]):not([type="checkbox"]):focus-visible {
   outline-offset: 3px;
 }
 
-#vote-form > .button { margin-top: 1.4rem; }
+.pick-status {
+  margin: 0;
+  color: var(--48-navy);
+  font-weight: 800;
+}
+
+.pick-status:empty { display: none; }
+
+.pick-status.is-short,
+.pick-status.is-over { color: var(--48-orange-dark); }
+
+.pick-status.is-counted { color: #167247; }
 
 .message {
   min-height: 1.5em;
@@ -702,7 +737,7 @@ input:not([type="radio"]):not([type="checkbox"]):focus-visible {
 @media (max-width: 600px) {
   h1 { text-align: center; }
 
-  .poll legend {
+  .poll-heading {
     flex-direction: column;
     align-items: flex-start;
     gap: 0.4rem;
@@ -731,21 +766,30 @@ input:not([type="radio"]):not([type="checkbox"]):focus-visible {
 
 .poll .countdown {
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: flex-start;
-  gap: 0.35rem;
-  width: fit-content;
-  max-width: 100%;
-  margin: 0.7rem 0 0.2rem;
-  padding: 0.35rem 0.75rem;
-  border-radius: 0.45rem;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  width: 100%;
+  margin: 0.85rem 0 0.35rem;
+  padding: 0.7rem 0.9rem 0.85rem;
+  border-radius: 0.55rem;
   background: radial-gradient(ellipse at bottom, var(--48-purple-dark) 0%, var(--48-black) 100%);
   color: var(--48-orange);
-  font-weight: 600;
+  font-weight: 800;
   text-align: left;
-  font-size: clamp(1.2rem, 3.5vw, 1.7rem);
+  line-height: 1.05;
+  font-size: clamp(2.15rem, 5.5vw, 3.15rem);
   --clock-color: var(--48-gold);
+}
+
+.poll .countdown-prefix {
+  display: block;
+  max-width: 100%;
+}
+
+.poll .countdown .clock {
+  font-size: clamp(3.6rem, 16vw, 7rem);
+  transform: none;
 }
 
 .poll .countdown[hidden] { display: none; }
@@ -756,6 +800,7 @@ input:not([type="radio"]):not([type="checkbox"]):focus-visible {
   transform: translateY(0.1em);
   display: inline-block;
   position: relative;
+  line-height: 1;
 }
 
 .clock .on {

@@ -397,15 +397,25 @@ async function uploadImage(request: Request, env: Env, slug: string) {
 async function screeningResults(env: Env, slug: string) {
   const found = await requireScreening(env, slug);
   if ("response" in found) return found.response;
-  const ballots = await env.DB.prepare("SELECT COUNT(DISTINCT code_hash) AS ballots FROM votes WHERE screening_id = ?").bind(found.row.id).first<{ ballots: number }>();
-  const listed = await env.DB.prepare(`SELECT p.id AS poll_id, p.slug AS poll_slug, p.title AS poll_title,
-      o.id AS option_id, o.title AS option_title, COUNT(v.id) AS votes
+  const counted = `WITH counted AS (
+      SELECT v.poll_id, v.code_hash
+      FROM votes v
+      JOIN polls p ON p.id = v.poll_id
+      WHERE p.screening_id = ?
+      GROUP BY v.poll_id, v.code_hash
+      HAVING COUNT(*) BETWEEN MIN(p.min_selections) AND MAX(p.max_selections)
+    )`;
+  const ballots = await env.DB.prepare(`${counted} SELECT COUNT(DISTINCT code_hash) AS ballots FROM counted`).bind(found.row.id).first<{ ballots: number }>();
+  const listed = await env.DB.prepare(`${counted}
+    SELECT p.id AS poll_id, p.slug AS poll_slug, p.title AS poll_title,
+      o.id AS option_id, o.title AS option_title, COUNT(c.code_hash) AS votes
     FROM polls p
     LEFT JOIN options o ON o.poll_id = p.id
     LEFT JOIN votes v ON v.option_id = o.id
+    LEFT JOIN counted c ON c.poll_id = v.poll_id AND c.code_hash = v.code_hash
     WHERE p.screening_id = ?
     GROUP BY p.id, p.slug, p.title, p.sort_order, o.id, o.title, o.sort_order
-    ORDER BY p.sort_order, p.title, COUNT(v.id) DESC, o.sort_order, o.title`).bind(found.row.id).all<ResultRow>();
+    ORDER BY p.sort_order, p.title, COUNT(c.code_hash) DESC, o.sort_order, o.title`).bind(found.row.id, found.row.id).all<ResultRow>();
   const polls: { id: string; slug: string; title: string; votes: number; options: { id: string; title: string; votes: number }[] }[] = [];
   for (const row of listed.results || []) {
     let poll = polls.find((item) => item.id === row.poll_id);

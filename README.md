@@ -9,13 +9,13 @@ Cloudflare Pages + Functions voting site for `vote.sandiego48.com`.
 - Images: Cloudflare R2. Each poll stores an `imageConfig` for aspect ratio and how many seconds each still stays on screen.
 - Admin writes go through `/api/admin`. `GET /api` links to `GET /api/openapi.json`. `GET /api/admin` lists `workflows.createScreening`.
 - `/admin` edits those same resources in the browser.
-- A vote code belongs to one screening and is unique across the site. One submission covers every open poll in that screening, and the same code can update a poll until that poll closes. `/c/<code>` enters the code the same way the home page does.
+- A vote code belongs to one screening and is unique across the site. Picks save as they change, and the same code can change a poll until that poll closes. `/c/<code>` enters the code the same way the home page does.
 
 ## How voting works
 
 The home page, or `/c/<code>`, posts the ticket code to `POST /api/enter`. A recognized code is stored in `sessionStorage` and the browser opens `/s/<slug>`. Opening `/s/<slug>` without that session entry returns to the home page. `GET /api/screenings/<slug>` and `GET /api/assets/...` do not check the code. A code that already voted can enter again; the response includes its current selections.
 
-`POST /api/vote` accepts each poll on its own. A poll's `voting` value is `scheduled`, `open`, or `closed`. `scheduled` accepts a selection only while the request time is within that poll's `startAt` and `stopAt`. `open` and `closed` start or stop that poll immediately. Closed polls stay grayed out and keep their stored selections. Open polls replace that code's previous selections when the count is inside the minimum and maximum. A minimum of 0 may be left blank. The code is marked used on the first accepted ballot. Entering a code does not check that state. If every poll is closed, the vote returns 403.
+`POST /api/vote` stores each named poll on its own. A poll's `voting` value is `scheduled`, `open`, or `closed`. `scheduled` stores a selection only while the request time is within that poll's `startAt` and `stopAt`. `open` and `closed` start or stop that poll immediately. Closed polls stay grayed out and keep their stored selections. Open polls replace that code's previous selections for the polls in the request, including a count outside the minimum and maximum. Results include a code's picks for a poll only when the saved count is inside that range. A minimum of 0 counts a blank poll. The code is marked used on the first saved change. Entering a code does not check that state. If none of the polls being saved are open, the vote returns 403.
 
 The ballot frames stills with the poll's aspect ratio and fits each image inside that frame. An option with more than one still crossfades after `imageConfig.cycle` seconds, which defaults to 2. Uploaded files are not checked against the aspect ratio.
 
@@ -56,8 +56,8 @@ Unauthenticated requests to `https://vote.sandiego48.com/api/admin` are challeng
 ## Not implemented yet
 
 - The Access service token named in `AGENTS.md`, if it is not already on the Access application. The admin Functions already verify the Access JWT.
-- Atomic vote-code consumption. Overlapping submissions of the same code can both record votes.
+- Atomic vote-code consumption. Overlapping saves of the same code can both record votes.
 - Checks that uploads match `imageConfig.aspectRatio`.
-- Rate limiting on public vote submission.
+- Rate limiting on public vote saves.
 - Tests against a local D1 and R2, including concurrent use of one code.
 - An accessibility pass on a phone viewport: keyboard focus, error announcements, and touch target size.

@@ -28,7 +28,8 @@ const entryKey = "sd48-vote-entry";
 let current: Screening;
 let activeCode = "";
 let selections: Record<string, string[]> = {};
-let hasBallot = false;
+let saveFlight: Promise<void> | null = null;
+let saveAgain = false;
 const clockStops = new Map<string, () => void>();
 const clockKeys = new Map<string, string>();
 let armed: { at: number; kind: "start" | "end" } | null = null;
@@ -73,11 +74,8 @@ function render(s: Screening) {
   clearClocks();
   armed = null;
   current = s;
-  const anyOpen = s.polls.some(pollOpen);
   const hero = s.bannerImage ? `<div class="screening-banner" style="background-image:url('${esc(s.bannerImage)}')"></div>` : "";
-  const buttonLabel = anyOpen ? `${hasBallot ? "Update votes" : "Submit votes"} <span>→</span>` : "Voting is closed";
-  app.innerHTML = `${brandHeader(Boolean(s.bannerImage))}${hero}<main><section class="intro"><span class="kicker">Audience voting</span><h1>${esc(s.title)}</h1>${s.venue ? `<p class="venue">${esc(s.venue)}</p>` : ""}<p>Make your picks. Vote code <strong>${esc(activeCode)}</strong>.</p></section><form id="vote-form" autocomplete="off"><div id="polls">${s.polls.map(renderPoll).join("")}</div><button class="button primary" type="submit"${anyOpen ? "" : " disabled"}>${buttonLabel}</button><p class="message" role="status"></p></form></main><p id="selection-toast" class="selection-toast" role="status"></p>`;
-  document.querySelector<HTMLFormElement>("#vote-form")!.addEventListener("submit", submitVotes);
+  app.innerHTML = `${brandHeader(Boolean(s.bannerImage))}${hero}<main><section class="intro"><span class="kicker">Audience voting</span><h1>${esc(s.title)}</h1>${s.venue ? `<p class="venue">${esc(s.venue)}</p>` : ""}<p>Make your picks. Vote code <strong>${esc(activeCode)}</strong>.</p></section><div id="ballot"><div id="polls">${s.polls.map(renderPoll).join("")}</div></div></main><p id="selection-toast" class="selection-toast" role="status"></p>`;
   document.querySelectorAll<HTMLElement>("[data-cycle]").forEach(startCycle);
   for (const poll of s.polls) bindPoll(poll);
   watchVoting();
@@ -91,33 +89,93 @@ function renderPoll(poll: Poll) {
   const type = poll.maxSelections === 1 && poll.minSelections > 0 ? "radio" : "checkbox";
   const options = poll.options.map((option) => {
     const image = option.images.length ? ` data-cycle='${esc(JSON.stringify(option.images))}' data-seconds="${seconds}" style="aspect-ratio:${ratio}"` : ` style="aspect-ratio:${ratio}"`;
-    const required = open && type === "radio" ? " required" : "";
     const checked = chosen.has(option.id) ? " checked" : "";
     const disabled = open ? "" : " disabled";
-    return `<label class="option"><input type="${type}" name="poll-${poll.id}" value="${esc(option.id)}"${required}${checked}${disabled}/><span class="option-image"${image}></span><span class="option-copy"><strong>${esc(option.title)}</strong>${option.description ? `<small>${esc(option.description)}</small>` : ""}</span></label>`;
+    return `<label class="option"><input type="${type}" name="poll-${poll.id}" value="${esc(option.id)}"${checked}${disabled}/><span class="option-image"${image}></span><span class="option-copy"><strong>${esc(option.title)}</strong>${option.description ? `<small>${esc(option.description)}</small>` : ""}</span></label>`;
   }).join("");
   const rule = poll.minSelections === poll.maxSelections ? `Select ${poll.minSelections}` : `Select ${poll.minSelections}–${poll.maxSelections}`;
+  const titleId = `poll-${poll.id}-title`;
   const status = statusText(poll);
   const ended = !open && !notStarted(poll);
-  return `<fieldset class="poll${open ? "" : " is-closed"}"><legend><span class="poll-title">${esc(poll.title)}</span><span class="rule">${rule}</span></legend><div class="countdown" data-countdown="${esc(poll.id)}" hidden><span class="countdown-prefix"></span><span class="countdown-clock"></span></div>${status ? `<p class="window closed">${esc(status)}</p>` : ""}${poll.instructions ? `<p class="instructions">${esc(poll.instructions)}</p>` : ""}${ended ? `<p class="help">This poll is closed. The picks shown here stay as they are.</p>` : ""}<div class="options">${options}</div></fieldset>`;
+  const statusLine = status ? `<p class="window closed">${esc(status)}</p>` : "";
+  const pick = pickCopy(poll, chosen.size);
+  const pickLine = open ? `<p class="pick-status${pick.className}" data-pick-status="${esc(poll.id)}">${esc(pick.text)}</p>` : "";
+  return `<fieldset class="poll${open ? "" : " is-closed"}" aria-labelledby="${esc(titleId)}"><div class="poll-pin"><div class="poll-heading"><h2 class="poll-title" id="${esc(titleId)}">${esc(poll.title)}</h2><span class="rule">${rule}</span></div><div class="countdown" data-countdown="${esc(poll.id)}" hidden><span class="countdown-prefix"></span><span class="countdown-clock"></span></div>${statusLine}${pickLine}</div>${poll.instructions ? `<p class="instructions">${esc(poll.instructions)}</p>` : ""}${ended ? `<p class="help">This poll is closed. The picks shown here stay as they are.</p>` : ""}<div class="options">${options}</div></fieldset>`;
+}
+
+function pickCopy(poll: Poll, count: number) {
+  if (count < poll.minSelections) {
+    const remaining = poll.minSelections - count;
+    const text = remaining === 1 ? "Select 1 more" : `Select ${remaining} more`;
+    return { text, className: " is-short", toast: `${text} for ${poll.title}` };
+  }
+  if (count > poll.maxSelections) {
+    const text = `Select at most ${poll.maxSelections}`;
+    return { text, className: " is-over", toast: `${text} for ${poll.title}` };
+  }
+  if (count === 0) return { text: "", className: "", toast: "" };
+  return { text: "Your vote counts", className: " is-counted", toast: `Your vote counts for ${poll.title}` };
 }
 
 function bindPoll(poll: Poll) {
   if (!pollOpen(poll)) return;
-  const inputs = document.querySelectorAll<HTMLInputElement>(`input[name="poll-${poll.id}"]`);
-  inputs.forEach((input) => input.addEventListener("change", () => onPollChange(poll, input)));
+  const inputs = document.querySelectorAll<HTMLInputElement>(`input[name="poll-${CSS.escape(poll.id)}"]`);
+  inputs.forEach((input) => input.addEventListener("change", () => onPollChange(poll)));
 }
 
-function onPollChange(poll: Poll, input: HTMLInputElement) {
-  const boxes = Array.from(document.querySelectorAll<HTMLInputElement>(`input[name="poll-${poll.id}"]`));
-  let checked = boxes.filter((box) => box.checked);
-  if (input.checked && checked.length > poll.maxSelections) {
-    input.checked = false;
-    checked = boxes.filter((box) => box.checked);
-    showToast(`You can select ${poll.maxSelections} for ${poll.title}`);
+function onPollChange(poll: Poll) {
+  const checked = Array.from(document.querySelectorAll<HTMLInputElement>(`input[name="poll-${CSS.escape(poll.id)}"]:checked`));
+  const copy = pickCopy(poll, checked.length);
+  const status = document.querySelector<HTMLElement>(`[data-pick-status="${CSS.escape(poll.id)}"]`);
+  if (status) {
+    status.textContent = copy.text;
+    status.className = `pick-status${copy.className}`;
   }
-  const remaining = poll.minSelections - checked.length;
-  if (remaining > 0) showToast(remaining === 1 ? `Select 1 more for ${poll.title}` : `Select ${remaining} more for ${poll.title}`);
+  if (copy.toast) showToast(copy.toast);
+  selections[poll.id] = checked.map((input) => input.value);
+  scheduleSave();
+}
+
+function scheduleSave() {
+  if (saveFlight) {
+    saveAgain = true;
+    return;
+  }
+  saveFlight = saveSelections().finally(() => {
+    saveFlight = null;
+    if (saveAgain) {
+      saveAgain = false;
+      scheduleSave();
+    }
+  });
+}
+
+function openSelections() {
+  const next: Record<string, string[]> = {};
+  for (const poll of current.polls) {
+    if (!pollOpen(poll)) continue;
+    next[poll.id] = Array.from(document.querySelectorAll<HTMLInputElement>(`input[name="poll-${CSS.escape(poll.id)}"]:checked`)).map((input) => input.value);
+  }
+  return next;
+}
+
+async function saveSelections() {
+  const chosen = openSelections();
+  if (!Object.keys(chosen).length) return;
+  try {
+    const response = await fetch("/api/vote", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ screeningId: current.id, code: activeCode, selections: chosen }) });
+    const data = await response.json() as { error?: string };
+    if (!response.ok) throw Error(data.error || "That pick could not be saved");
+    for (const [id, ids] of Object.entries(chosen)) selections[id] = ids;
+    saveEntry({ code: activeCode, slug, selections });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "That pick could not be saved";
+    showToast(message);
+    if (message === "Voting is not open") {
+      saveAgain = false;
+      void refreshBallot();
+    }
+  }
 }
 
 function showToast(text: string) {
@@ -127,14 +185,6 @@ function showToast(text: string) {
   el.classList.add("is-on");
   window.clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => el.classList.remove("is-on"), 1400);
-}
-
-function chosenSelections(form: HTMLFormElement) {
-  const next: Record<string, string[]> = {};
-  current.polls.forEach((poll) => {
-    next[poll.id] = Array.from(form.querySelectorAll<HTMLInputElement>(`input[name="poll-${poll.id}"]:checked`)).map((input) => input.value);
-  });
-  return next;
 }
 
 function watchVoting() {
@@ -190,7 +240,6 @@ async function refreshBallot() {
     const screening = await loadScreening(slug);
     const entered = await enter(activeCode);
     selections = entered.selections;
-    hasBallot = entered.used;
     saveEntry({ code: activeCode, slug, selections });
     render(screening);
   } catch {
@@ -220,40 +269,6 @@ function startCycle(el: HTMLElement) {
     incoming.classList.add("is-shown");
     window.setTimeout(() => outgoing.classList.remove("is-shown"), fadeMs);
   }, cycleSeconds(el.dataset.seconds) * 1000));
-}
-
-async function submitVotes(event: SubmitEvent) {
-  event.preventDefault();
-  const form = event.currentTarget as HTMLFormElement;
-  const button = form.querySelector<HTMLButtonElement>("button")!;
-  const msg = form.querySelector<HTMLElement>(".message")!;
-  const chosen = chosenSelections(form);
-  const short = current.polls.find((poll) => pollOpen(poll) && (chosen[poll.id].length < poll.minSelections || chosen[poll.id].length > poll.maxSelections));
-  if (short) {
-    const remaining = short.minSelections - chosen[short.id].length;
-    showToast(remaining > 0 ? (remaining === 1 ? `Select 1 more for ${short.title}` : `Select ${remaining} more for ${short.title}`) : `Select at most ${short.maxSelections} for ${short.title}`);
-    return;
-  }
-  button.disabled = true;
-  msg.className = "message";
-  msg.textContent = "Submitting…";
-  try {
-    const response = await fetch("/api/vote", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ screeningId: current.id, code: activeCode, selections: chosen }) });
-    const data = await response.json() as { error?: string };
-    if (!response.ok) throw Error(data.error || "Vote could not be submitted");
-    for (const poll of current.polls) if (pollOpen(poll)) selections[poll.id] = chosen[poll.id];
-    hasBallot = true;
-    saveEntry({ code: activeCode, slug, selections });
-    msg.className = "message success";
-    msg.textContent = "Your votes are recorded. You can change them while a poll is still open.";
-    button.textContent = "Update votes →";
-    button.disabled = !current.polls.some(pollOpen);
-  } catch (err) {
-    msg.className = "message error";
-    msg.textContent = err instanceof Error ? err.message : "Vote could not be submitted";
-    button.disabled = false;
-    if (err instanceof Error && err.message === "Voting is not open") void refreshBallot();
-  }
 }
 
 async function enter(code: string) {
@@ -309,12 +324,10 @@ async function openScreening() {
   if (!entry || entry.slug !== slug) { clearEntry(); location.replace("/"); return; }
   activeCode = entry.code;
   selections = entry.selections || {};
-  hasBallot = Object.values(selections).some((ids) => ids.length > 0);
   try {
     const [screening, entered] = await Promise.all([loadScreening(slug), enter(entry.code)]);
     if (entered.slug !== slug) { clearEntry(); location.replace("/"); return; }
     selections = entered.selections;
-    hasBallot = entered.used;
     saveEntry({ code: entry.code, slug: entered.slug, selections });
     render(screening);
   } catch (err) {
