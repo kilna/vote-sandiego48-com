@@ -287,8 +287,9 @@ main.home .gate {
 }
 
 .option {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
   min-height: 100%;
   cursor: pointer;
   transition: transform 0.15s ease, border-color 0.15s ease;
@@ -312,9 +313,114 @@ main.home .gate {
 
 .option-image {
   display: block;
+  grid-area: 1 / 1;
   overflow: hidden;
   background: linear-gradient(135deg, var(--48-navy-nearwhite), var(--48-navy-light));
 }
+
+.zoom {
+  display: grid;
+  grid-area: 1 / 1;
+  place-items: center;
+  justify-self: start;
+  align-self: end;
+  z-index: 4;
+  width: 3.4rem;
+  height: 3.4rem;
+  margin: 0 0 0.55rem 0.55rem;
+  padding: 0;
+  border: 0.18rem solid var(--48-white);
+  border-radius: 999px;
+  background: var(--48-purple);
+  color: var(--48-white);
+  box-shadow: 0 0.15rem 0.45rem rgb(0 0 0 / 0.4);
+  cursor: pointer;
+}
+
+.zoom svg { width: 1.75rem; height: 1.75rem; }
+
+.zoom:focus-visible {
+  outline: 3px solid var(--48-navy);
+  outline-offset: 3px;
+}
+
+.poll.is-closed .zoom {
+  pointer-events: auto;
+  filter: none;
+}
+
+body.is-zoomed { overflow: hidden; }
+
+.zoom-view {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding:
+    max(0.75rem, env(safe-area-inset-top))
+    max(0.8rem, env(safe-area-inset-right))
+    max(0.75rem, env(safe-area-inset-bottom))
+    max(0.8rem, env(safe-area-inset-left));
+  background: var(--48-navy-nearblack);
+  color: var(--48-white);
+}
+
+.zoom-title {
+  margin: 0;
+  font-size: clamp(1.25rem, 4vw, 1.7rem);
+  font-weight: 800;
+  line-height: 1.15;
+  text-align: center;
+}
+
+.zoom-stage {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  overflow: hidden;
+  touch-action: none;
+}
+
+.zoom-stage img {
+  width: auto;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  transform-origin: center center;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.zoom-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.zoom-nav[hidden] { display: none; }
+
+.zoom-count {
+  font-weight: 800;
+  text-align: center;
+}
+
+.zoom-step { min-height: 2.8rem; min-width: 6.5rem; }
+
+.zoom-back {
+  width: 100%;
+  min-height: 3.5rem;
+  font-size: 1.35rem;
+}
+
+.zoom-back:hover { transform: none; }
 
 .option-image .still {
   position: absolute;
@@ -328,7 +434,10 @@ main.home .gate {
 
 .option-image .still.is-shown { opacity: 1; }
 
-.option-copy { padding: 0.8rem 0.9rem 1rem; }
+.option-copy {
+  grid-area: 2 / 1;
+  padding: 0.8rem 0.9rem 1rem;
+}
 
 .option-copy strong {
   display: block;

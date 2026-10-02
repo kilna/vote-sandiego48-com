@@ -3,6 +3,7 @@ import { startAdmin } from "./admin";
 import { startClock } from "./countdown";
 import { nextVotingCue, votingOpen } from "../functions/voting";
 import { pickMessage, samePicks, shouldApplySelections } from "./sync";
+import { bindPosterZoom, posterZoomButton } from "./zoom";
 
 type Voting = "scheduled" | "open" | "closed";
 type Poll = {
@@ -102,7 +103,8 @@ function renderPoll(poll: Poll) {
     const image = option.images.length ? ` data-cycle='${esc(JSON.stringify(option.images))}' data-seconds="${seconds}" style="aspect-ratio:${ratio}"` : ` style="aspect-ratio:${ratio}"`;
     const checked = chosen.has(option.id) ? " checked" : "";
     const disabled = open ? "" : " disabled";
-    return `<label class="option"><input type="${type}" name="poll-${poll.id}" value="${esc(option.id)}"${checked}${disabled}/><span class="option-image"${image}></span><span class="option-copy"><strong>${esc(option.title)}</strong>${option.description ? `<small>${esc(option.description)}</small>` : ""}</span></label>`;
+    const zoom = option.images.length ? posterZoomButton(esc(option.title)) : "";
+    return `<label class="option"><input type="${type}" name="poll-${poll.id}" value="${esc(option.id)}"${checked}${disabled}/><span class="option-image"${image}></span>${zoom}<span class="option-copy"><strong>${esc(option.title)}</strong>${option.description ? `<small>${esc(option.description)}</small>` : ""}</span></label>`;
   }).join("");
   const rule = poll.minSelections === poll.maxSelections ? `Select ${poll.minSelections}` : `Select ${poll.minSelections}–${poll.maxSelections}`;
   const titleId = `poll-${poll.id}-title`;
@@ -451,6 +453,8 @@ async function openScreening() {
     else unavailable("Screening not found");
   }
 }
+
+bindPosterZoom(app);
 
 if (location.pathname === "/admin" || location.pathname.startsWith("/admin/")) startAdmin();
 else if (codePath) void openCode(codePath);

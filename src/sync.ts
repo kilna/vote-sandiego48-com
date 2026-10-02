@@ -26,8 +26,9 @@ export function pickMessage(
   if (!options.open && count === 0) return { text: "No vote was cast", className: " is-short", kind: "none" };
   if (kind === "short" || kind === "over") {
     if (!options.open) return { text: "Your saved vote doesn't count", className: kind === "over" ? " is-over" : " is-short", kind: kind as PickKind };
+    const remaining = poll.minSelections - count;
     const need = kind === "short"
-      ? (poll.minSelections - count === 1 ? "Select 1 more" : `Select ${poll.minSelections - count} more`)
+      ? (count === 0 ? `Select ${remaining}` : remaining === 1 ? "Select 1 more" : `Select ${remaining} more`)
       : `Select at most ${poll.maxSelections}`;
     const text = options.corrected ? `Your saved vote doesn't count. ${need}.` : need;
     return { text, className: kind === "short" ? " is-short" : " is-over", kind: kind as PickKind };

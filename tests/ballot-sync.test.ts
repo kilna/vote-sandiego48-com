@@ -29,8 +29,10 @@ describe("ballot sync", () => {
 
   it("tells the voter when a corrected or closed vote is outside the selection range", () => {
     const poll = { minSelections: 1, maxSelections: 2 };
-    expect(pickMessage(poll, 0, { corrected: false, open: true }).text).toBe("Select 1 more");
-    expect(pickMessage(poll, 0, { corrected: true, open: true }).text).toBe("Your saved vote doesn't count. Select 1 more.");
+    expect(pickMessage(poll, 0, { corrected: false, open: true }).text).toBe("Select 1");
+    expect(pickMessage(poll, 0, { corrected: true, open: true }).text).toBe("Your saved vote doesn't count. Select 1.");
+    expect(pickMessage({ minSelections: 3, maxSelections: 3 }, 0, { corrected: false, open: true }).text).toBe("Select 3");
+    expect(pickMessage({ minSelections: 3, maxSelections: 3 }, 1, { corrected: false, open: true }).text).toBe("Select 2 more");
     expect(pickMessage(poll, 3, { corrected: true, open: true }).text).toBe("Your saved vote doesn't count. Select at most 2.");
     expect(pickMessage(poll, 0, { corrected: false, open: false }).text).toBe("No vote was cast");
     expect(pickMessage(poll, 3, { corrected: false, open: false }).text).toBe("Your saved vote doesn't count");
