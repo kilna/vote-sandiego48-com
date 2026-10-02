@@ -235,7 +235,7 @@ async function createPoll(request: Request, env: Env, slug: string) {
   const voting = "scheduled";
   const id = crypto.randomUUID();
   try {
-    await env.DB.prepare("INSERT INTO polls (id, event_id, slug, title, instructions, min_selections, max_selections, image_config, sort_order, voting, start_at, stop_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(id, found.row.id, value.slug, value.title, blankToNull(value.instructions), value.minSelections, value.maxSelections, JSON.stringify(value.imageConfig), sortOrder, voting, startAt, stopAt).run();
+    await env.DB.prepare("INSERT INTO polls (id, event_id, slug, title, instructions, min_selections, max_selections, image_config, sort_order, voting, start_at, stop_at, show_results, results_limit, results_delay_minutes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(id, found.row.id, value.slug, value.title, blankToNull(value.instructions), value.minSelections, value.maxSelections, JSON.stringify(value.imageConfig), sortOrder, voting, startAt, stopAt, value.showResults ? 1 : 0, value.resultsLimit, value.resultsDelayMinutes).run();
   } catch (err) {
     if (isUnique(err)) return error(409, "A poll with this slug already exists on the event.", { field: "slug" });
     throw err;
@@ -269,11 +269,12 @@ async function updatePoll(request: Request, env: Env, slug: string, pollSlug: st
   const startAt = typeof value.startAt === "string" ? value.startAt : poll.row.start_at || "";
   const stopAt = typeof value.stopAt === "string" ? value.stopAt : poll.row.stop_at || "";
   if (Date.parse(stopAt) <= Date.parse(startAt)) return invalid({ stopAt: "Must be after startAt." });
-  const columns: Record<string, string> = { slug: "slug", title: "title", instructions: "instructions", minSelections: "min_selections", maxSelections: "max_selections", imageConfig: "image_config", sortOrder: "sort_order", voting: "voting", startAt: "start_at", stopAt: "stop_at" };
+  const columns: Record<string, string> = { slug: "slug", title: "title", instructions: "instructions", minSelections: "min_selections", maxSelections: "max_selections", imageConfig: "image_config", sortOrder: "sort_order", voting: "voting", startAt: "start_at", stopAt: "stop_at", showResults: "show_results", resultsLimit: "results_limit", resultsDelayMinutes: "results_delay_minutes" };
   const keys = Object.keys(value).filter((key) => columns[key]);
   const stored = keys.map((key) => {
     if (key === "instructions") return blankToNull(value[key]);
     if (key === "imageConfig") return JSON.stringify(value[key]);
+    if (key === "showResults") return value[key] ? 1 : 0;
     return value[key];
   });
   try {
@@ -462,7 +463,7 @@ async function screeningResults(env: Env, slug: string) {
     LEFT JOIN counted c ON c.poll_id = v.poll_id AND c.code_hash = v.code_hash
     WHERE p.event_id = ?
     GROUP BY p.id, p.slug, p.title, p.voting, p.start_at, p.stop_at, p.sort_order, o.id, o.title, o.sort_order
-    ORDER BY p.sort_order, p.title, COUNT(c.code_hash) DESC, o.sort_order, o.title`).bind(found.row.id, found.row.id).all<ResultRow>();
+    ORDER BY p.sort_order, p.title, COUNT(c.code_hash) DESC, MIN(CASE WHEN c.code_hash IS NOT NULL THEN v.created_at END), o.sort_order, o.title`).bind(found.row.id, found.row.id).all<ResultRow>();
   const polls: { id: string; slug: string; title: string; votes: number; voting: "scheduled" | "open" | "closed"; votingOpen: boolean; startAt: string; stopAt: string; options: { id: string; title: string; votes: number }[] }[] = [];
   for (const row of listed.results || []) {
     let poll = polls.find((item) => item.id === row.poll_id);

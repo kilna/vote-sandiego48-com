@@ -26,6 +26,9 @@ export type PollRow = {
   voting?: string | null;
   start_at?: string | null;
   stop_at?: string | null;
+  show_results?: number | null;
+  results_limit?: number | null;
+  results_delay_minutes?: number | null;
 };
 
 export type OptionRow = {
@@ -99,6 +102,9 @@ export function presentPoll(screeningSlug: string, row: PollRow, options: Return
     stopAt,
     voting: votingMode(row.voting),
     votingOpen: Boolean(startAt && stopAt && votingOpen(startAt, stopAt)),
+    showResults: Boolean(row.show_results),
+    resultsLimit: Number(row.results_limit ?? 3),
+    resultsDelayMinutes: Number(row.results_delay_minutes ?? 0),
     options,
     links: {
       self: `/api/admin/events/${slug}/polls/${pollSlug}`,

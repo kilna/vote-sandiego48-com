@@ -113,6 +113,9 @@ export const pollWrite: ObjectSchema = {
     sortOrder: { type: "integer", description: "Position among this event's polls. Lower numbers come first. Defaults to the next position. To set the whole list in one call, use reorderPolls instead of patching this field on each poll.", example: 0, minimum: 0, maximum: 10000 },
     startAt: { type: "string", description: "When this poll opens. Defaults to the event startAt. To open it now, set this to the current time. The close time must stay after it.", example: "2026-05-01T18:00:00-07:00", pattern: TIMESTAMP, patternMessage: TIMESTAMP_MESSAGE, format: "date-time" },
     stopAt: { type: "string", description: "When this poll closes. Defaults to the event stopAt. To close it now, set this to the current time. To close it in a number of minutes, set this that far ahead. If the open time is still in the future, set startAt to now as well so the window stays valid.", example: "2026-05-01T23:00:00-07:00", pattern: TIMESTAMP, patternMessage: TIMESTAMP_MESSAGE, format: "date-time" },
+    showResults: { type: "boolean", description: "When true, the ballot lists the leading options after voting has been over for resultsDelayMinutes. Defaults to false. Counts stay hidden until that time.", example: false, default: false },
+    resultsLimit: { type: "integer", description: "How many leading options the ballot shows. Defaults to 3. A tie goes to the option that received a counted vote earlier. Options with no counted vote stay in ballot order, then title.", example: 3, minimum: 1, maximum: 100, default: 3 },
+    resultsDelayMinutes: { type: "integer", description: "Minutes after stopAt before the ballot shows results. Zero shows them when voting ends. Defaults to 0.", example: 0, minimum: 0, maximum: 10080, default: 0 },
   },
   refine: (value, mode) => ({ ...selectionOrder(value, mode), ...dateOrder(value) }),
 };
@@ -129,6 +132,9 @@ export const pollPatch: ObjectSchema = {
     sortOrder: pollWrite.fields.sortOrder,
     startAt: pollWrite.fields.startAt,
     stopAt: pollWrite.fields.stopAt,
+    showResults: pollWrite.fields.showResults,
+    resultsLimit: pollWrite.fields.resultsLimit,
+    resultsDelayMinutes: pollWrite.fields.resultsDelayMinutes,
   },
   refine: (value, mode) => ({ ...selectionOrder(value, mode), ...dateOrder(value) }),
 };
@@ -336,7 +342,7 @@ export const adminRoutes: AdminRoute[] = [
   { method: "GET", parts: ["events", ":slug"], operationId: "getEvent", summary: "Read an event", description: "Returns the event with its polls and options.", response: "Event", status: 200 },
   { method: "PATCH", parts: ["events", ":slug"], operationId: "updateEvent", summary: "Update an event", description: "Changes only the fields you send. Set bannerImageKey to a key from uploadEventImage, or null to remove the banner. Voting is controlled on each poll.", body: "EventPatch", response: "Event", status: 200 },
   { method: "DELETE", parts: ["events", ":slug"], operationId: "deleteEvent", summary: "Delete an event", description: "Deletes the event, its polls, options, vote codes, and votes, then deletes images stored for that event.", response: "Deleted", status: 200 },
-  { method: "GET", parts: ["events", ":slug", "results"], operationId: "getEventResults", summary: "Read vote results", description: "Totals selections for each option. A vote code counts for a poll only when its saved pick count is between that poll's minSelections and maxSelections. Polls stay in ballot order. Options within a poll are ordered by vote count, then ballot order. ballots is the number of distinct vote codes that count for at least one poll. A poll's votes can exceed ballots when that poll allows more than one selection. Options with no votes are included. now is the server time. Each poll includes its voting window. The results page requests this about every 3 seconds while it is open.", response: "EventResults", status: 200 },
+  { method: "GET", parts: ["events", ":slug", "results"], operationId: "getEventResults", summary: "Read vote results", description: "Totals selections for each option. A vote code counts for a poll only when its saved pick count is between that poll's minSelections and maxSelections. Polls stay in ballot order. Options within a poll are ordered by vote count, then by the earliest counted vote, then ballot order. ballots is the number of distinct vote codes that count for at least one poll. A poll's votes can exceed ballots when that poll allows more than one selection. Options with no votes are included. now is the server time. Each poll includes its voting window. The results page requests this about every 3 seconds while it is open.", response: "EventResults", status: 200 },
   { method: "GET", parts: ["events", ":slug", "polls"], operationId: "listPolls", summary: "List polls", description: "Polls are ordered by sortOrder, then title. Each poll includes its options.", response: "PollList", status: 200 },
   { method: "POST", parts: ["events", ":slug", "polls"], operationId: "createPoll", summary: "Create a poll", description: "Add a poll to an event. A duplicate poll slug within the event returns 409.", body: "PollWrite", response: "Poll", status: 201 },
   { method: "GET", parts: ["events", ":slug", "polls", ":pollSlug"], operationId: "getPoll", summary: "Read a poll", description: "Returns one poll and its options.", response: "Poll", status: 200 },
@@ -505,7 +511,7 @@ export function openapiDocument() {
     requestBody: jsonBody("VoteRequest", false),
   });
   addPath(paths, "/api/state", "POST", {
-    ...publicOperation("readBallotState", "Read the stored ballot", "Returns this code's stored picks and each poll's voting window at the server's current time. The ballot posts here about every 3 seconds while the tab is visible, and again after a save that does not return this snapshot. It does not change votes. A saved count outside minSelections and maxSelections is still returned; the ballot tells the voter that vote does not count.", "BallotState", {
+    ...publicOperation("readBallotState", "Read the stored ballot", "Returns this code's stored picks and each poll's voting window at the server's current time. The ballot posts here about every 3 seconds while the tab is visible, and again after a save that does not return this snapshot. It does not change votes. A saved count outside minSelections and maxSelections is still returned; the ballot tells the voter that vote does not count. Each poll's results is the leading options when that poll is set to show them and the delay after stopAt has passed, or null until then.", "BallotState", {
       "400": "The body is not JSON or the code is empty.",
       "403": "No vote code matches.",
     }),
@@ -557,9 +563,12 @@ export function openapiDocument() {
         EventSummary: resourceSchema(["id", "slug", "title", "venue", "timezone", "startAt", "stopAt", "bannerImageKey", "bannerImage", "links"]),
         Event: resourceSchema(["id", "slug", "title", "venue", "timezone", "startAt", "stopAt", "bannerImageKey", "bannerImage", "polls", "links"], { polls: { type: "array", items: { $ref: "#/components/schemas/Poll" } } }),
         PollList: { type: "object", required: ["polls"], properties: { polls: { type: "array", items: { $ref: "#/components/schemas/Poll" } } } },
-        Poll: resourceSchema(["id", "slug", "title", "instructions", "minSelections", "maxSelections", "imageConfig", "sortOrder", "startAt", "stopAt", "voting", "votingOpen", "options", "links"], {
+        Poll: resourceSchema(["id", "slug", "title", "instructions", "minSelections", "maxSelections", "imageConfig", "sortOrder", "startAt", "stopAt", "voting", "votingOpen", "showResults", "resultsLimit", "resultsDelayMinutes", "options", "links"], {
           imageConfig: { $ref: "#/components/schemas/ImageConfig" },
           options: { type: "array", items: { $ref: "#/components/schemas/Option" } },
+          showResults: { type: "boolean", description: "Whether the ballot will list leading options after the delay." },
+          resultsLimit: { type: "integer", description: "How many leading options the ballot shows." },
+          resultsDelayMinutes: { type: "integer", description: "Minutes after stopAt before those options appear. Zero means when voting ends." },
           ...votingFields,
         }),
         OptionList: { type: "object", required: ["options"], properties: { options: { type: "array", items: { $ref: "#/components/schemas/Option" } } } },
@@ -651,7 +660,7 @@ export function openapiDocument() {
         VoteRequest: { type: "object", required: ["eventId", "code", "selections"], additionalProperties: false, properties: { eventId: { type: "string", description: "Event id from GET /api/events/{slug}. The field name is eventId." }, code: { type: "string" }, selections: { type: "object", additionalProperties: { type: "array", items: { type: "string" } }, description: "Map of poll id to chosen option ids." } } },
         VoteResult: { type: "object", properties: { ok: { type: "boolean" }, error: { type: "string" }, now: { type: "string", format: "date-time" }, polls: { type: "array", items: { $ref: "#/components/schemas/BallotPoll" } }, selections: { type: "object", additionalProperties: { type: "array", items: { type: "string" } } } } },
         BallotState: { type: "object", required: ["now", "slug", "title", "eventId", "used", "polls", "selections"], properties: { now: { type: "string", format: "date-time", description: "Server time when this snapshot was read." }, slug: { type: "string" }, title: { type: "string" }, eventId: { type: "string" }, used: { type: "boolean" }, polls: { type: "array", items: { $ref: "#/components/schemas/BallotPoll" } }, selections: { type: "object", additionalProperties: { type: "array", items: { type: "string" } }, description: "Stored option ids by poll id, including a count outside the minimum and maximum." } } },
-        BallotPoll: { type: "object", required: ["id", "voting", "votingOpen", "startAt", "stopAt"], properties: { id: { type: "string" }, voting: { type: "string", enum: ["scheduled", "open", "closed"] }, votingOpen: { type: "boolean", description: "Whether a pick saved at this response would be stored." }, startAt: { type: "string", format: "date-time" }, stopAt: { type: "string", format: "date-time" } } },
+        BallotPoll: { type: "object", required: ["id", "voting", "votingOpen", "startAt", "stopAt"], properties: { id: { type: "string" }, voting: { type: "string", enum: ["scheduled", "open", "closed"] }, votingOpen: { type: "boolean", description: "Whether a pick saved at this response would be stored." }, startAt: { type: "string", format: "date-time" }, stopAt: { type: "string", format: "date-time" }, results: { type: ["array", "null"], description: "Leading options once this poll is set to show them and resultsDelayMinutes have passed after stopAt. Null until then. Ordered by votes, then by the earliest counted vote, then ballot order. A code counts only when its saved pick count is inside the poll minimum and maximum.", items: { $ref: "#/components/schemas/OptionResults" } } } },
         PublicEvent: { type: "object", description: "Ballot payload. Poll and option fields use camelCase. images and bannerImage are asset URLs." },
         Asset: { type: "string", format: "binary" },
       },

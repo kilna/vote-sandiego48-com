@@ -5,7 +5,7 @@ import { voteCodeUrl } from "./vote-link";
 type ImageConfig = { aspectRatio: string; cycle?: number; zoomable?: boolean };
 type Option = { id: string; title: string; description: string | null; imageKeys: string[]; images: string[]; sortOrder: number };
 type Voting = "scheduled" | "open" | "closed";
-type Poll = { id: string; slug: string; title: string; instructions: string | null; minSelections: number; maxSelections: number; imageConfig: ImageConfig; sortOrder: number; startAt: string; stopAt: string; voting: Voting; votingOpen: boolean; options: Option[] };
+type Poll = { id: string; slug: string; title: string; instructions: string | null; minSelections: number; maxSelections: number; imageConfig: ImageConfig; sortOrder: number; startAt: string; stopAt: string; voting: Voting; votingOpen: boolean; showResults?: boolean; resultsLimit?: number; resultsDelayMinutes?: number; options: Option[] };
 type Event = {
   id: string;
   slug: string;
@@ -546,7 +546,10 @@ function pollFields(screening: Event, poll: Poll | null) {
   const start = toLocalInput(poll?.startAt || screening.startAt);
   const stop = toLocalInput(poll?.stopAt || screening.stopAt);
   const help = poll ? "Changes save as you edit. " : "";
-  return `<div class="field-row"><label>Slug<input name="slug" required maxlength="64" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" value="${esc(poll?.slug || "")}"></label><label>Title<input name="title" required maxlength="200" value="${esc(poll?.title || "")}"></label></div><label>Instructions<textarea name="instructions" maxlength="2000" rows="3">${esc(poll?.instructions || "")}</textarea></label><div class="field-row"><label>Minimum selections<input name="minSelections" type="number" min="0" max="100" required value="${poll?.minSelections ?? 1}"></label><label>Maximum selections<input name="maxSelections" type="number" min="0" max="100" required value="${poll?.maxSelections ?? 1}"></label></div><div class="field-row"><label>Voting opens<input name="startAt" type="datetime-local" required value="${start}"></label><label>Voting closes<input name="stopAt" type="datetime-local" required value="${stop}"></label></div><div class="field-row"><label>Aspect ratio<input name="aspectRatio" required value="${esc(config?.aspectRatio || "16:9")}"></label><label>Seconds per image<input name="cycle" type="number" min="1" max="60" required value="${config?.cycle ?? 2}"></label><label class="check">Zoomable<input name="zoomable" type="checkbox"${config?.zoomable ? " checked" : ""}></label></div><p class="help">${help}Zoomable adds a magnifier on each image so a voter can look closer. This poll opens at its open time and closes at its close time. Start voting and Stop voting in X minutes change those times.</p>`;
+  const show = poll?.showResults ? " checked" : "";
+  const limit = poll?.resultsLimit ?? 3;
+  const delay = poll?.resultsDelayMinutes ?? 0;
+  return `<div class="field-row"><label>Slug<input name="slug" required maxlength="64" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" value="${esc(poll?.slug || "")}"></label><label>Title<input name="title" required maxlength="200" value="${esc(poll?.title || "")}"></label></div><label>Instructions<textarea name="instructions" maxlength="2000" rows="3">${esc(poll?.instructions || "")}</textarea></label><div class="field-row"><label>Minimum selections<input name="minSelections" type="number" min="0" max="100" required value="${poll?.minSelections ?? 1}"></label><label>Maximum selections<input name="maxSelections" type="number" min="0" max="100" required value="${poll?.maxSelections ?? 1}"></label></div><div class="field-row"><label>Voting opens<input name="startAt" type="datetime-local" required value="${start}"></label><label>Voting closes<input name="stopAt" type="datetime-local" required value="${stop}"></label></div><div class="field-row"><label>Aspect ratio<input name="aspectRatio" required value="${esc(config?.aspectRatio || "16:9")}"></label><label>Seconds per image<input name="cycle" type="number" min="1" max="60" required value="${config?.cycle ?? 2}"></label><label class="check">Zoomable<input name="zoomable" type="checkbox"${config?.zoomable ? " checked" : ""}></label></div><p class="results-reveal"><label><input name="showResults" type="checkbox"${show}>Show top</label><input name="resultsLimit" type="number" min="1" max="100" required value="${limit}" aria-label="How many results"><span>voting results</span><input name="resultsDelayMinutes" type="number" min="0" max="10080" required value="${delay}" aria-label="Minutes after voting ends"><span>minutes after the end of voting</span></p><p class="help">${help}Zoomable adds a magnifier on each image so a voter can look closer. This poll opens at its open time and closes at its close time. Start voting and Stop voting in X minutes change those times. Show top X voting results lists that many leaders on the ballot that many minutes after voting ends.</p>`;
 }
 
 function optionForm(poll: Poll, option: Option | null, open = true) {
@@ -690,6 +693,9 @@ function pollBody(form: HTMLFormElement) {
     },
     startAt: fromLocalInput(String(data.startAt || "")),
     stopAt: fromLocalInput(String(data.stopAt || "")),
+    showResults: form.querySelector<HTMLInputElement>("[name=showResults]")?.checked === true,
+    resultsLimit: clampCount(String(data.resultsLimit || ""), 1, 100, 3),
+    resultsDelayMinutes: clampCount(String(data.resultsDelayMinutes || ""), 0, 10080, 0),
   };
   return body;
 }
@@ -959,6 +965,12 @@ function bindCodes(screening: Event) {
   document.querySelector("#use-code")!.addEventListener("click", () => void createAndUse(screening));
   document.querySelector("#download-codes")!.addEventListener("click", () => void downloadCodes(screening));
   document.querySelector("#reset-voting")!.addEventListener("click", () => void resetVoting(screening));
+}
+
+function clampCount(value: string, min: number, max: number, fallback: number) {
+  const count = Math.round(Number(value));
+  if (!Number.isFinite(count)) return fallback;
+  return Math.min(max, Math.max(min, count));
 }
 
 function clampMinutes(value: string) {

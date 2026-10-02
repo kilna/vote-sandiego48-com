@@ -6,6 +6,7 @@ import { pickMessage, samePicks, shouldApplySelections } from "./sync";
 import { bindPosterZoom, posterZoomButton } from "./zoom";
 
 type Voting = "scheduled" | "open" | "closed";
+type AudienceResult = { id: string; title: string; votes: number };
 type Poll = {
   id: string;
   title: string;
@@ -17,6 +18,7 @@ type Poll = {
   stopAt: string;
   voting?: Voting;
   votingOpen?: boolean;
+  results?: AudienceResult[] | null;
   options: { id: string; title: string; description?: string; images: string[] }[];
 };
 type Event = { id: string; slug: string; title: string; venue?: string; bannerImage?: string; startAt: string; stopAt: string; polls: Poll[] };
@@ -47,7 +49,7 @@ const stateEveryMs = 3000;
 
 type BallotSnapshot = {
   now: string;
-  polls: { id: string; voting: Voting; votingOpen: boolean; startAt: string; stopAt: string }[];
+  polls: { id: string; voting: Voting; votingOpen: boolean; startAt: string; stopAt: string; results?: AudienceResult[] | null }[];
   selections: Record<string, string[]>;
 };
 
@@ -108,7 +110,37 @@ function renderPoll(poll: Poll) {
   }).join("");
   const rule = poll.minSelections === poll.maxSelections ? `Select ${poll.minSelections}` : `Select ${poll.minSelections}–${poll.maxSelections}`;
   const titleId = `poll-${poll.id}-title`;
-  return `<fieldset class="poll${open ? "" : " is-closed"}" data-poll="${esc(poll.id)}" aria-labelledby="${esc(titleId)}"><div class="poll-pin"><div class="poll-heading"><h2 class="poll-title" id="${esc(titleId)}">${esc(poll.title)}</h2><span class="rule">${rule}</span></div><div class="countdown" data-countdown="${esc(poll.id)}" hidden><span class="countdown-prefix"></span><span class="countdown-clock"></span></div><p class="window" data-window="${esc(poll.id)}" hidden></p><p class="pick-status" data-pick-status="${esc(poll.id)}" role="status"></p></div>${poll.instructions ? `<p class="instructions">${esc(poll.instructions)}</p>` : ""}<div class="options">${options}</div></fieldset>`;
+  return `<fieldset class="poll${open ? "" : " is-closed"}" data-poll="${esc(poll.id)}" aria-labelledby="${esc(titleId)}"><div class="poll-pin"><div class="poll-heading"><h2 class="poll-title" id="${esc(titleId)}">${esc(poll.title)}</h2><span class="rule">${rule}</span></div><div class="countdown" data-countdown="${esc(poll.id)}" hidden><span class="countdown-prefix"></span><span class="countdown-clock"></span></div><p class="window" data-window="${esc(poll.id)}" hidden></p><p class="pick-status" data-pick-status="${esc(poll.id)}" role="status"></p></div>${poll.instructions ? `<p class="instructions">${esc(poll.instructions)}</p>` : ""}${resultsMarkup(poll.results)}<div class="options">${options}</div></fieldset>`;
+}
+
+function resultsKey(results: AudienceResult[] | null | undefined) {
+  if (results == null) return "hidden";
+  return `shown:${results.map((item) => `${item.id}:${item.votes}`).join("|")}`;
+}
+
+function resultsMarkup(results: AudienceResult[] | null | undefined) {
+  const hidden = results == null ? " hidden" : "";
+  return `<section class="audience-results" data-audience-results data-results-key="${esc(resultsKey(results))}"${hidden}><h3>Results</h3><ol>${resultsRows(results)}</ol></section>`;
+}
+
+function resultsRows(results: AudienceResult[] | null | undefined) {
+  const items = results || [];
+  if (!items.length) return `<li class="result-empty">No votes counted yet.</li>`;
+  return items.map((item, index) => {
+    const label = item.votes === 1 ? "1 vote" : `${item.votes} votes`;
+    return `<li><span class="rank">${index + 1}</span><span class="result-name">${esc(item.title)}</span><span class="result-votes">${esc(label)}</span></li>`;
+  }).join("");
+}
+
+function paintResults(poll: Poll) {
+  const box = document.querySelector<HTMLElement>(`.poll[data-poll="${CSS.escape(poll.id)}"] [data-audience-results]`);
+  if (!box) return;
+  const key = resultsKey(poll.results);
+  if (box.dataset.resultsKey === key) return;
+  box.dataset.resultsKey = key;
+  box.hidden = poll.results == null;
+  const list = box.querySelector("ol");
+  if (list) list.innerHTML = resultsRows(poll.results);
 }
 
 let stopFit: (() => void) | null = null;
@@ -337,8 +369,12 @@ function applyWindows(snapshot: BallotSnapshot) {
     poll.votingOpen = next.votingOpen;
     poll.startAt = next.startAt;
     poll.stopAt = next.stopAt;
+    if ("results" in next) poll.results = next.results ?? null;
   }
-  for (const poll of current.polls) paintWindow(poll);
+  for (const poll of current.polls) {
+    paintWindow(poll);
+    paintResults(poll);
+  }
   syncCountdowns();
 }
 

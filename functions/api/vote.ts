@@ -1,5 +1,6 @@
 import { readBallot } from "../ballot";
 import { hashCode } from "../codes";
+import { assignResults, revealedByPoll } from "../results";
 import type { Env } from "../types";
 import { votingOpen } from "../voting";
 
@@ -42,6 +43,7 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
 
 async function jsonState(env: Env, codeHash: string, body: Record<string, unknown>, status: number) {
   const state = await readBallot(env, codeHash);
-  const payload = state ? { ...body, now: state.now, polls: state.polls, selections: state.selections } : body;
+  const polls = state ? assignResults(state.polls, await revealedByPoll(env, state.eventId, Date.parse(state.now))) : undefined;
+  const payload = state ? { ...body, now: state.now, polls, selections: state.selections } : body;
   return Response.json(payload, { status, headers: { "Cache-Control": "no-store" } });
 }

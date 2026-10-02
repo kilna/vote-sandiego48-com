@@ -1,5 +1,6 @@
 import { parseImageConfig } from "../../admin/present";
 import { assetUrl } from "../../assets";
+import { assignResults, revealedByPoll } from "../../results";
 import type { Env, Event } from "../../types";
 import { votingMode, votingOpen } from "../../voting";
 export const onRequestGet: PagesFunction<Env> = async ({ env, params }) => {
@@ -25,5 +26,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ env, params }) => {
       options: options.results.map((o: any) => ({ id: o.id, title: o.title, description: o.description || undefined, images: JSON.parse(o.image_keys || "[]").map((key: string) => assetUrl(key)) })),
     });
   }
+  const revealed = await revealedByPoll(env, screening.id);
+  result.polls = assignResults(result.polls, revealed);
   return Response.json(result, { headers: { "Cache-Control": "no-store" } });
 };

@@ -250,6 +250,52 @@ main.home .gate {
 
 .instructions { margin-top: 0.45rem; }
 
+.audience-results {
+  margin: 0.85rem 0 0.2rem;
+  padding: 0.85rem 0.95rem 0.95rem;
+  border: 0.2rem solid var(--48-navy);
+  border-radius: 0.5rem;
+  background: var(--48-white);
+  color: var(--48-navy);
+}
+
+.audience-results[hidden] { display: none; }
+
+.audience-results h3 {
+  margin: 0 0 0.45rem;
+  font-size: 1.25rem;
+}
+
+.audience-results ol {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.audience-results li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.65rem;
+  font-weight: 800;
+}
+
+.audience-results .rank {
+  min-width: 1.4rem;
+  color: var(--48-orange-dark);
+}
+
+.audience-results .result-name { flex: 1; }
+
+.audience-results .result-votes {
+  font-variant-numeric: tabular-nums;
+}
+
+.audience-results .result-empty {
+  font-weight: 700;
+}
+
 .options {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
@@ -838,6 +884,7 @@ input:not([type="radio"]):not([type="checkbox"]):focus-visible {
 .poll-options {
   display: grid;
   gap: 0.75rem;
+  margin-top: 1.25rem;
   padding-top: 1rem;
   border-top: 0.125rem solid var(--48-purple-nearwhite);
 }
@@ -899,6 +946,32 @@ input:not([type="radio"]):not([type="checkbox"]):focus-visible {
 .editor label.check input {
   width: 1.35rem;
   height: 1.35rem;
+}
+
+.results-reveal {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.55rem;
+  margin: 0.35rem 0 0;
+  color: var(--48-navy);
+  font-weight: 800;
+}
+
+.results-reveal label {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.results-reveal input[type="checkbox"] {
+  width: 1.35rem;
+  height: 1.35rem;
+}
+
+.results-reveal input[type="number"] {
+  width: 4.75rem;
+  padding: 0.45rem 0.55rem;
 }
 
 .field-row {
