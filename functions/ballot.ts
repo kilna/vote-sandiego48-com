@@ -55,7 +55,7 @@ export function foldBallot(rows: BallotRow[], now = Date.now()): BallotState | n
       polls.push({
         id: row.poll_id,
         voting: votingMode(row.voting),
-        votingOpen: Boolean(startAt && stopAt && votingOpen(row.voting, startAt, stopAt, now)),
+        votingOpen: Boolean(startAt && stopAt && votingOpen(startAt, stopAt, now)),
         startAt,
         stopAt,
       });

@@ -1,5 +1,5 @@
 import { startClock } from "./countdown";
-import { nextVotingCue, stopInMinutes, votingOpen } from "../functions/voting";
+import { nextVotingCue, startNow, stopInMinutes, stopNow, votingOpen } from "../functions/voting";
 import { voteCodeUrl } from "./vote-link";
 
 type ImageConfig = { aspectRatio: string; cycle?: number; zoomable?: boolean };
@@ -134,7 +134,7 @@ async function render() {
   } catch (err) {
     if (gen !== generation) return;
     fail(err);
-    if (!(err instanceof ApiError && err.status === 401)) paint(shell("Admin", `<p><a class="button secondary" href="/admin">All screenings</a></p>`));
+    if (!(err instanceof ApiError && err.status === 401)) paint(shell("Admin", `<p><a class="button secondary" href="/admin">All events</a></p>`));
   }
 }
 
@@ -143,7 +143,7 @@ function brandHeader() {
 }
 
 function shell(title: string, body: string) {
-  return `${brandHeader()}<main><section class="intro"><span class="kicker">Admin</span><h1>${esc(title)}</h1><p class="admin-links"><a href="/admin">All screenings</a> · <a href="/api/openapi.json">API reference</a></p><p id="admin-message" class="message${messageError ? " error" : message ? " success" : ""}" role="status">${esc(message)}</p></section>${body}</main>`;
+  return `${brandHeader()}<main><section class="intro"><span class="kicker">Admin</span><h1>${esc(title)}</h1><p class="admin-links"><a href="/admin">All events</a> · <a href="/api/openapi.json">API reference</a></p><p id="admin-message" class="message${messageError ? " error" : message ? " success" : ""}" role="status">${esc(message)}</p></section>${body}</main>`;
 }
 
 function paint(html: string) {
@@ -176,11 +176,11 @@ async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 async function listScreen(gen: number) {
-  paint(shell("Screenings", "<p>Loading…</p>"));
+  paint(shell("Events", "<p>Loading…</p>"));
   const data = await api<{ screenings: Summary[] }>("/api/admin/screenings");
   if (gen !== generation) return;
-  const items = data.screenings.length ? data.screenings.map(summaryCard).join("") : "<p>No screenings yet.</p>";
-  paint(shell("Screenings", `<p><a class="button primary" href="/admin/screenings/new">New screening</a></p><div class="stack">${items}</div>`));
+  const items = data.screenings.length ? data.screenings.map(summaryCard).join("") : "<p>No events yet.</p>";
+  paint(shell("Events", `<p><a class="button primary" href="/admin/screenings/new">New event</a></p><div class="stack">${items}</div>`));
   document.querySelectorAll<HTMLButtonElement>("[data-delete-screening]").forEach((button) => {
     button.addEventListener("click", () => void removeScreening(button.dataset.deleteScreening || ""));
   });
@@ -208,6 +208,7 @@ async function resultsScreen(gen: number, slug: string) {
   latestResults = data;
   noteResultsSkew(data.now);
   paint(shell(data.title, resultsBody(data)));
+  bindResultVoting(gen, slug);
   syncResultClocks();
   startResultsLive(gen, slug);
 }
@@ -226,12 +227,12 @@ function voteLabel(count: number) {
 
 function resultsBody(data: ScreeningResults) {
   const polls = data.polls.map(resultPoll).join("") || "<p>No polls yet.</p>";
-  return `<p><a href="/admin/screenings/${encodeURIComponent(data.slug)}">Edit screening</a></p><p data-result-ballots>${ballotLabel(data.ballots)}</p><div id="results">${polls}</div>`;
+  return `<p><a href="/admin/screenings/${encodeURIComponent(data.slug)}">Edit event</a></p><p data-result-ballots>${ballotLabel(data.ballots)}</p><div id="results">${polls}</div>`;
 }
 
 function resultPoll(poll: ResultPoll) {
   const options = poll.options.length ? `<div data-result-options>${poll.options.map((option) => resultOption(poll, option)).join("")}</div>` : `<p class="help">No options yet.</p>`;
-  return `<section class="editor result-poll" data-result-poll="${esc(poll.id)}"><h2>${esc(poll.title)}</h2><div class="countdown" data-countdown="${esc(poll.id)}" hidden><span class="countdown-prefix"></span><span class="countdown-clock"></span></div><p class="window" data-window="${esc(poll.id)}" hidden></p><p data-result-total>${voteLabel(poll.votes)}</p>${options}</section>`;
+  return `<section class="editor result-poll" data-result-poll="${esc(poll.id)}"><h2>${esc(poll.title)}</h2><div class="countdown" data-countdown="${esc(poll.id)}" hidden><span class="countdown-prefix"></span><span class="countdown-clock"></span></div><p class="window" data-window="${esc(poll.id)}" hidden></p><p data-result-total>${voteLabel(poll.votes)}</p>${options}${votingControls()}</section>`;
 }
 
 function resultOption(poll: ResultPoll, option: ResultOption) {
@@ -276,7 +277,19 @@ function applyResults(data: ScreeningResults) {
     }
   }
   if (ballots) ballots.textContent = ballotLabel(data.ballots);
+  bindResultVoting(generation, data.slug);
   syncResultClocks();
+}
+
+function bindResultVoting(gen: number, screeningSlug: string) {
+  const data = latestResults;
+  if (!data) return;
+  for (const poll of data.polls) {
+    const section = document.querySelector<HTMLElement>(`[data-result-poll="${CSS.escape(poll.id)}"]`);
+    if (!section || section.dataset.votingBound === "1") continue;
+    section.dataset.votingBound = "1";
+    bindVoting(section, screeningSlug, () => latestResults?.polls.find((item) => item.id === poll.id) || poll, () => refreshResults(gen, screeningSlug));
+  }
 }
 
 function resultNodesShape() {
@@ -298,9 +311,7 @@ function resultsNow() {
 }
 
 function freshenResultPoll(poll: ResultPoll) {
-  if (poll.voting === "open") poll.votingOpen = true;
-  else if (poll.voting === "closed") poll.votingOpen = false;
-  else poll.votingOpen = votingOpen(poll.voting, poll.startAt, poll.stopAt, resultsNow());
+  poll.votingOpen = votingOpen(poll.startAt, poll.stopAt, resultsNow());
 }
 
 function formatResultTime(iso: string) {
@@ -329,8 +340,8 @@ function syncResultClocks() {
         windowEl.hidden = false;
         windowEl.className = poll.votingOpen ? "window" : "window closed";
         const when = formatResultTime(poll.stopAt);
-        if (poll.voting === "closed" || !poll.votingOpen) windowEl.textContent = poll.voting === "scheduled" && Date.parse(poll.startAt) > now ? "Voting isn't open yet" : "Voting is closed";
-        else if (poll.voting === "scheduled" && when) windowEl.textContent = `Voting ends at ${when}`;
+        if (!poll.votingOpen) windowEl.textContent = Date.parse(poll.startAt) > now ? "Voting isn't open yet" : "Voting is closed";
+        else if (when) windowEl.textContent = `Voting ends at ${when}`;
         else windowEl.textContent = "Voting is open";
       }
       continue;
@@ -372,42 +383,53 @@ async function refreshResults(gen: number, slug: string) {
 }
 
 function newScreen() {
-  paint(shell("New screening", `<form id="screening-form" class="editor"><p class="help">After this, you can add a banner, polls, options, and vote codes.</p>${screeningFields(null)}<div class="admin-actions"><button class="button primary" type="submit">Create screening</button></div></form>`));
+  paint(shell("New event", `<form id="screening-form" class="editor"><p class="help">After this, you can add a banner, polls, options, and vote codes.</p>${screeningFields(null)}<div class="admin-actions"><button class="button primary" type="submit">Create event</button></div></form>`));
   bindScreeningForm(null);
 }
 
-function votingStatus(item: { voting: Voting; votingOpen: boolean }) {
-  const state = item.votingOpen ? "Voting is open" : "Voting is closed";
-  if (item.voting === "open") return `${state} · started manually`;
-  if (item.voting === "closed") return `${state} · stopped manually`;
-  return `${state} · following the schedule`;
+function votingControls() {
+  return `<div class="vote-controls"><button class="button primary" type="button" data-start-now>Start voting</button><p class="stop-in">Stop voting in <input type="number" min="0" max="240" value="5" data-stop-minutes aria-label="Minutes"> minutes <button class="button danger" type="button" data-stop-in>Stop Voting</button></p></div>`;
 }
 
-function votingDetail(item: { voting: Voting }) {
-  if (item.voting === "open") return "Picks are saved until you stop voting or return to the schedule.";
-  if (item.voting === "closed") return "Picks stay as they are until you start voting or return to the schedule.";
-  return "Picks are saved only between this poll's open and close times.";
+function votingStatus(poll: Poll) {
+  const opens = formatResultTime(poll.startAt);
+  const closes = formatResultTime(poll.stopAt);
+  if (Date.parse(poll.startAt) > Date.now()) return `Voting isn't open yet · opens at ${opens}`;
+  if (poll.votingOpen) return `Voting is open · closes at ${closes}`;
+  return `Voting is closed · closed at ${closes}`;
 }
 
 function pollVoting(poll: Poll) {
-  const button = (mode: Voting, label: string, className: string) => `<button class="button ${className}" type="button" data-voting="${mode}" aria-pressed="${poll.voting === mode}">${label}</button>`;
-  return `<section class="poll-voting"><p class="window ${poll.votingOpen ? "open" : "closed"}">${esc(votingStatus(poll))}</p><p class="help">${esc(votingDetail(poll))}</p><div class="admin-actions">${button("open", "Start voting", "primary")}${button("closed", "Stop voting", "danger")}${button("scheduled", "Follow schedule", "secondary")}</div><div class="stop-in"><label>Minutes<input type="number" min="1" max="240" value="5" data-stop-minutes></label><button class="button secondary" type="button" data-stop-in>Stop voting in 5 minutes</button></div></section>`;
+  return `<section class="poll-voting"><p class="window ${poll.votingOpen ? "open" : "closed"}">${esc(votingStatus(poll))}</p><p class="help">Picks are saved from the open time until the close time. Start voting sets the open time to now. Stop Voting sets the close time that many minutes from now. Zero closes it now.</p>${votingControls()}</section>`;
 }
 
-async function setPollVoting(screeningSlug: string, poll: Poll, voting: Voting) {
+type TimedPoll = { slug: string; title: string; startAt: string; stopAt: string };
+
+async function startPollNow(screeningSlug: string, poll: TimedPoll, reload: () => Promise<void>) {
+  if (Date.parse(poll.stopAt) <= Date.now()) {
+    showMessage(`${poll.title} has already closed. Set a later close time first.`, true);
+    return;
+  }
   try {
-    await api(`/api/admin/screenings/${encodeURIComponent(screeningSlug)}/polls/${encodeURIComponent(poll.slug)}`, { method: "PATCH", body: JSON.stringify({ voting }) });
-    note(voting === "open" ? `${poll.title} is open.` : voting === "closed" ? `${poll.title} is closed.` : `${poll.title} follows its schedule.`);
-    await render();
+    await api(`/api/admin/screenings/${encodeURIComponent(screeningSlug)}/polls/${encodeURIComponent(poll.slug)}`, { method: "PATCH", body: JSON.stringify(startNow()) });
+    showMessage(`${poll.title} opens now.`);
+    await reload();
   } catch (err) { fail(err); }
 }
 
-async function stopPoll(screeningSlug: string, poll: Poll, minutes: number) {
+async function stopPoll(screeningSlug: string, poll: TimedPoll, minutes: number, reload: () => Promise<void>) {
   try {
-    await api(`/api/admin/screenings/${encodeURIComponent(screeningSlug)}/polls/${encodeURIComponent(poll.slug)}`, { method: "PATCH", body: JSON.stringify(stopInMinutes(poll.startAt, minutes)) });
-    note(`${poll.title} stops in ${minutes} ${minutes === 1 ? "minute" : "minutes"}.`);
-    await render();
+    const body = minutes === 0 ? stopNow(poll.startAt) : stopInMinutes(poll.startAt, minutes);
+    await api(`/api/admin/screenings/${encodeURIComponent(screeningSlug)}/polls/${encodeURIComponent(poll.slug)}`, { method: "PATCH", body: JSON.stringify(body) });
+    showMessage(minutes === 0 ? `${poll.title} is closed.` : `${poll.title} stops in ${minutes} ${minutes === 1 ? "minute" : "minutes"}.`);
+    await reload();
   } catch (err) { fail(err); }
+}
+
+function bindVoting(root: HTMLElement, screeningSlug: string, current: () => TimedPoll, reload: () => Promise<void>) {
+  root.querySelector("[data-start-now]")?.addEventListener("click", () => void startPollNow(screeningSlug, current(), reload));
+  const minutesInput = root.querySelector<HTMLInputElement>("[data-stop-minutes]");
+  root.querySelector("[data-stop-in]")?.addEventListener("click", () => void stopPoll(screeningSlug, current(), clampMinutes(minutesInput?.value || ""), reload));
 }
 
 function screeningFields(screening: Screening | null) {
@@ -430,11 +452,11 @@ function bindScreeningForm(existing: Screening | null) {
     try {
       const saved = await api<Screening>(existing ? `/api/admin/screenings/${encodeURIComponent(existing.slug)}` : "/api/admin/screenings", { method: existing ? "PATCH" : "POST", body: JSON.stringify(body) });
       if (existing && saved.slug === existing.slug) {
-        note("Screening saved.");
+        note("Event saved.");
         await render();
         return;
       }
-      sessionStorage.setItem(noticeKey, JSON.stringify({ text: existing ? "Screening saved." : "Screening created.", error: false }));
+      sessionStorage.setItem(noticeKey, JSON.stringify({ text: existing ? "Event saved." : "Event created.", error: false }));
       location.assign(`/admin/screenings/${encodeURIComponent(saved.slug)}`);
     } catch (err) { fail(err); }
   });
@@ -446,7 +468,7 @@ async function editScreen(gen: number, slug: string) {
   if (expandOptionId) openOptions.add(expandOptionId);
   expandPollId = "";
   expandOptionId = "";
-  paint(shell("Screening", "<p>Loading…</p>"));
+  paint(shell("Event", "<p>Loading…</p>"));
   const [screening, counts] = await Promise.all([
     api<Screening>(`/api/admin/screenings/${encodeURIComponent(slug)}`),
     api<CodeList>(`/api/admin/screenings/${encodeURIComponent(slug)}/codes`),
@@ -472,10 +494,10 @@ function editBody(screening: Screening, counts: CodeList) {
   const hasPolls = screening.polls.length > 0;
   const polls = hasPolls ? `<div id="poll-list" class="sheet-list">${screening.polls.map((poll) => pollBlock(screening, poll)).join("")}</div>` : "<p>No polls yet.</p>";
   return `<p><a href="${esc(screening.links.ballot)}">Ballot page</a> · <a href="/api/screenings/${encodeURIComponent(screening.slug)}">Public JSON</a></p>
-    <form id="screening-form" class="editor"><h2>Screening</h2>${screeningFields(screening)}<div class="admin-actions"><button class="button primary" type="submit">Save screening</button><button class="button danger" type="button" id="delete-screening">Delete screening</button></div></form>
+    <form id="screening-form" class="editor"><h2>Event</h2>${screeningFields(screening)}<div class="admin-actions"><button class="button primary" type="submit">Save event</button><button class="button danger" type="button" id="delete-screening">Delete event</button></div></form>
     <section class="editor" id="banner-section"><h2>Banner</h2>${screening.bannerImage ? `<img class="banner-preview" alt="" src="${esc(screening.bannerImage)}">` : "<p>No banner yet.</p>"}<label>Image file<input id="banner-file" type="file" accept="${imageAccept}"></label><div class="admin-actions"><button class="button secondary" type="button" id="upload-banner">Upload banner</button>${screening.bannerImageKey ? `<button class="button danger" type="button" id="clear-banner">Remove banner</button>` : ""}</div><p class="help">Filenames use letters, numbers, dots, hyphens, and underscores. Uploading the same name replaces that file.</p></section>
     <h2 class="section-title">Polls</h2>${polls}
-    ${hasPolls ? revealButton("new-poll", "Add poll") : ""}
+    ${hasPolls ? revealButton("new-poll", "Add poll", true) : ""}
     ${newPollForm(screening, !hasPolls)}
     <section class="editor codes-sheet"><h2>Vote codes</h2><p>${counts.total} total · ${counts.unused} unused · ${counts.used} used</p><p class="help">Each code's URL is https://vote.sandiego48.com/c/CODE, which enters that code. A code can update any poll that is still open. The download lists every code, whether it has been used, and its URL. Typing ignores spaces and hyphens.</p><p class="help">Reset voting deletes every code and every cast vote. Polls, films, and images stay.</p>${counts.unlisted ? `<p class="help">${counts.unlisted} older ${counts.unlisted === 1 ? "code was" : "codes were"} saved before downloads existed. ${counts.unlisted === 1 ? "It still works" : "They still work"} and ${counts.unlisted === 1 ? "is" : "are"} not in the file.</p>` : ""}<form id="codes-form"><label class="codes-count">How many<input name="count" type="number" min="1" max="500" required></label><div class="admin-actions"><button class="button primary" type="submit">Generate codes</button><button class="button secondary" type="button" id="download-codes">Download codes</button>${counts.unused ? `<button class="button danger" type="button" id="remove-codes">Remove unused codes</button>` : ""}<button class="button danger" type="button" id="reset-voting">Reset voting</button></div></form></section>`;
 }
@@ -503,8 +525,8 @@ function newPollForm(screening: Screening, open: boolean) {
   return `<form id="new-poll" class="editor"${open ? "" : " hidden"}><h2>New poll</h2>${pollFields(screening, null)}<div class="admin-actions"><button class="button primary" type="submit">Add poll</button>${collapseButton(open)}</div></form>`;
 }
 
-function revealButton(id: string, label: string) {
-  return `<div class="admin-actions add-toggle-row"><button class="button secondary add-toggle" type="button" data-reveal="${esc(id)}" aria-expanded="false" aria-controls="${esc(id)}">${esc(label)}</button></div>`;
+function revealButton(id: string, label: string, centered = false) {
+  return `<div class="admin-actions add-toggle-row${centered ? " is-centered" : ""}"><button class="button secondary add-toggle" type="button" data-reveal="${esc(id)}" aria-expanded="false" aria-controls="${esc(id)}">${esc(label)}</button></div>`;
 }
 
 function collapseButton(open: boolean) {
@@ -516,7 +538,7 @@ function pollFields(screening: Screening, poll: Poll | null) {
   const start = toLocalInput(poll?.startAt || screening.startAt);
   const stop = toLocalInput(poll?.stopAt || screening.stopAt);
   const help = poll ? "Changes save as you edit. " : "";
-  return `<div class="field-row"><label>Slug<input name="slug" required maxlength="64" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" value="${esc(poll?.slug || "")}"></label><label>Title<input name="title" required maxlength="200" value="${esc(poll?.title || "")}"></label></div><label>Instructions<textarea name="instructions" maxlength="2000" rows="3">${esc(poll?.instructions || "")}</textarea></label><div class="field-row"><label>Minimum selections<input name="minSelections" type="number" min="0" max="100" required value="${poll?.minSelections ?? 1}"></label><label>Maximum selections<input name="maxSelections" type="number" min="0" max="100" required value="${poll?.maxSelections ?? 1}"></label></div><div class="field-row"><label>Voting opens<input name="startAt" type="datetime-local" required value="${start}"></label><label>Voting closes<input name="stopAt" type="datetime-local" required value="${stop}"></label></div><div class="field-row"><label>Aspect ratio<input name="aspectRatio" required value="${esc(config?.aspectRatio || "16:9")}"></label><label>Seconds per image<input name="cycle" type="number" min="1" max="60" required value="${config?.cycle ?? 2}"></label><label class="check">Zoomable<input name="zoomable" type="checkbox"${config?.zoomable ? " checked" : ""}></label></div><p class="help">${help}Zoomable adds a magnifier on each image so a voter can look closer. This poll opens and closes on its own schedule. Start, stop, and the minute timer take effect immediately.</p>`;
+  return `<div class="field-row"><label>Slug<input name="slug" required maxlength="64" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" value="${esc(poll?.slug || "")}"></label><label>Title<input name="title" required maxlength="200" value="${esc(poll?.title || "")}"></label></div><label>Instructions<textarea name="instructions" maxlength="2000" rows="3">${esc(poll?.instructions || "")}</textarea></label><div class="field-row"><label>Minimum selections<input name="minSelections" type="number" min="0" max="100" required value="${poll?.minSelections ?? 1}"></label><label>Maximum selections<input name="maxSelections" type="number" min="0" max="100" required value="${poll?.maxSelections ?? 1}"></label></div><div class="field-row"><label>Voting opens<input name="startAt" type="datetime-local" required value="${start}"></label><label>Voting closes<input name="stopAt" type="datetime-local" required value="${stop}"></label></div><div class="field-row"><label>Aspect ratio<input name="aspectRatio" required value="${esc(config?.aspectRatio || "16:9")}"></label><label>Seconds per image<input name="cycle" type="number" min="1" max="60" required value="${config?.cycle ?? 2}"></label><label class="check">Zoomable<input name="zoomable" type="checkbox"${config?.zoomable ? " checked" : ""}></label></div><p class="help">${help}Zoomable adds a magnifier on each image so a voter can look closer. This poll opens at its open time and closes at its close time. Start voting and Stop Voting change those times.</p>`;
 }
 
 function optionForm(poll: Poll, option: Option | null, open = true) {
@@ -626,23 +648,8 @@ function bindPoll(screening: Screening, poll: Poll) {
       await render();
     } catch (err) { fail(err); }
   });
-  const block = form.closest(".poll-block");
-  block?.querySelectorAll<HTMLButtonElement>("[data-voting]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const voting = button.dataset.voting as Voting;
-      if (voting === poll.voting) return;
-      void setPollVoting(screening.slug, poll, voting);
-    });
-  });
-  const minutesInput = block?.querySelector<HTMLInputElement>("[data-stop-minutes]");
-  const stopButton = block?.querySelector<HTMLButtonElement>("[data-stop-in]");
-  const labelMinutes = () => {
-    const minutes = clampMinutes(minutesInput?.value || "");
-    if (stopButton) stopButton.textContent = `Stop voting in ${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
-    return minutes;
-  };
-  minutesInput?.addEventListener("input", labelMinutes);
-  stopButton?.addEventListener("click", () => void stopPoll(screening.slug, poll, labelMinutes()));
+  const block = form.closest<HTMLElement>(".poll-block");
+  if (block) bindVoting(block, screening.slug, () => poll, () => render());
   const list = block?.querySelector<HTMLElement>(".option-list");
   if (list) bindReorder(list, ".option-sheet", () => void persistOptionOrder(screening, poll, list));
 }
@@ -935,7 +942,7 @@ function bindCodes(screening: Screening) {
 function clampMinutes(value: string) {
   const minutes = Math.round(Number(value));
   if (!Number.isFinite(minutes)) return 5;
-  return Math.min(240, Math.max(1, minutes));
+  return Math.min(240, Math.max(0, minutes));
 }
 
 async function downloadCodes(screening: Screening) {

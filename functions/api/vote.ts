@@ -20,7 +20,7 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   for (const pollId of pollIds) {
     const poll = byId.get(pollId);
     if (!poll) return Response.json({ error: "Invalid poll" }, { status: 400 });
-    if (!votingOpen(poll.voting, poll.start_at, poll.stop_at)) continue;
+    if (!votingOpen(poll.start_at, poll.stop_at)) continue;
     const raw = body.selections[pollId];
     if (!Array.isArray(raw)) return Response.json({ error: `Invalid selection for ${poll.title}` }, { status: 400 });
     const selected = [...new Set(raw.filter((id): id is string => typeof id === "string"))];

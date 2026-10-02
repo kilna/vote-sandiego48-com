@@ -74,21 +74,13 @@ export type Validation =
 
 const imageConfigDescription = "How the ballot frames and swaps stills. aspectRatio is width:height, such as 16:9 for film or 2:3 for a poster, and the public ballot uses it as the frame. cycle is how many seconds each still stays on screen before the next one. It is an integer from 1 to 60 and defaults to 2. zoomable is whether each image has a magnifier that opens it full screen. It defaults to false. An option shows every image uploaded for it, and more than one still crossfades. The API does not measure those files or check them against the aspect ratio.";
 
-const votingField: StringField = {
-  type: "string",
-  description: "scheduled opens and closes at this poll's startAt and stopAt. open stores picks until you change it. closed leaves picks unchanged until you change it.",
-  example: "scheduled",
-  enum: ["scheduled", "open", "closed"],
-  default: "scheduled",
-};
-
 export const screeningWrite: ObjectSchema = {
-  description: "Fields required to create a screening. startAt and stopAt are the screening window. A new poll copies that window, then keeps its own voting schedule.",
+  description: "Fields required to create an event. startAt and stopAt are the event window. A new poll copies that window, then keeps its own voting schedule.",
   fields: {
     slug: { type: "string", required: true, description: "Public id used in /s/{slug} and /api/screenings/{slug}.", example: "spring-screening", pattern: SLUG, patternMessage: SLUG_MESSAGE, maxLength: 64 },
-    title: { type: "string", required: true, description: "Name shown on the ballot.", example: "Spring Screening", minLength: 1, maxLength: 200 },
+    title: { type: "string", required: true, description: "Name shown on the ballot.", example: "Spring Event", minLength: 1, maxLength: 200 },
     venue: { type: "string", nullable: true, description: "Optional place name. Send null on update to clear it.", example: "Practice Theater", maxLength: 200, default: null },
-    timezone: { type: "string", description: "IANA timezone label stored with the screening. Poll startAt and stopAt already include an offset.", example: "America/Los_Angeles", minLength: 1, maxLength: 64, default: "America/Los_Angeles" },
+    timezone: { type: "string", description: "IANA timezone label stored with the event. Poll startAt and stopAt already include an offset.", example: "America/Los_Angeles", minLength: 1, maxLength: 64, default: "America/Los_Angeles" },
     startAt: { type: "string", required: true, description: TIMESTAMP_MESSAGE, example: "2026-05-01T18:00:00-07:00", pattern: TIMESTAMP, patternMessage: TIMESTAMP_MESSAGE, format: "date-time" },
     stopAt: { type: "string", required: true, description: TIMESTAMP_MESSAGE, example: "2026-05-01T23:00:00-07:00", pattern: TIMESTAMP, patternMessage: TIMESTAMP_MESSAGE, format: "date-time" },
   },
@@ -96,7 +88,7 @@ export const screeningWrite: ObjectSchema = {
 };
 
 export const screeningPatch: ObjectSchema = {
-  description: "Any subset of screening fields. Send null for venue or bannerImageKey to clear it. At least one field is required.",
+  description: "Any subset of event fields. Send null for venue or bannerImageKey to clear it. At least one field is required.",
   fields: {
     slug: screeningWrite.fields.slug,
     title: screeningWrite.fields.title,
@@ -104,24 +96,23 @@ export const screeningPatch: ObjectSchema = {
     timezone: screeningWrite.fields.timezone,
     startAt: screeningWrite.fields.startAt,
     stopAt: screeningWrite.fields.stopAt,
-    bannerImageKey: { type: "string", nullable: true, description: "Key returned by uploadScreeningImage, or null to remove the banner. The key must be {screeningId}/{filename} for this screening.", example: null },
+    bannerImageKey: { type: "string", nullable: true, description: "Key returned by uploadScreeningImage, or null to remove the banner. The key must be {screeningId}/{filename} for this event.", example: null },
   },
   refine: (value) => dateOrder(value),
 };
 
 export const pollWrite: ObjectSchema = {
-  description: "A poll belongs to one screening and has its own voting window. Saved picks are stored as the voter changes them. minSelections and maxSelections decide which of those picks are included in results. Omitting startAt or stopAt copies the screening window.",
+  description: "A poll belongs to one event and has its own voting window. Saved picks are stored as the voter changes them. minSelections and maxSelections decide which of those picks are included in results. Omitting startAt or stopAt copies the event window.",
   fields: {
-    slug: { type: "string", required: true, description: "Stable id for this poll within the screening.", example: "best-film", pattern: SLUG, patternMessage: SLUG_MESSAGE, maxLength: 64 },
+    slug: { type: "string", required: true, description: "Stable id for this poll within the event.", example: "best-film", pattern: SLUG, patternMessage: SLUG_MESSAGE, maxLength: 64 },
     title: { type: "string", required: true, description: "Heading shown for this poll.", example: "Best Film", minLength: 1, maxLength: 200 },
     instructions: { type: "string", nullable: true, description: "Optional text under the heading. Send null to clear it.", example: "One vote for the film you want to win.", maxLength: 2000, default: null },
     minSelections: { type: "integer", description: "Fewest options a counted ballot includes. Defaults to 1. Picks below this are stored and omitted from results. When omitted and maxSelections is set, maxSelections must still be at least this value. Zero counts a blank poll.", example: 1, minimum: 0, maximum: 100, default: 1 },
     maxSelections: { type: "integer", description: "Most options a counted ballot includes. Defaults to minSelections. Picks above this are stored and omitted from results.", example: 1, minimum: 0, maximum: 100 },
     imageConfig: { type: "imageConfig", description: imageConfigDescription, default: { aspectRatio: "16:9", cycle: imageCycleDefault, zoomable: false } },
-    sortOrder: { type: "integer", description: "Position among this screening's polls. Lower numbers come first. Defaults to the next position. To set the whole list in one call, use reorderPolls instead of patching this field on each poll.", example: 0, minimum: 0, maximum: 10000 },
-    startAt: { type: "string", description: "When this poll opens if voting is scheduled. Defaults to the screening startAt.", example: "2026-05-01T18:00:00-07:00", pattern: TIMESTAMP, patternMessage: TIMESTAMP_MESSAGE, format: "date-time" },
-    stopAt: { type: "string", description: "When this poll closes if voting is scheduled. Defaults to the screening stopAt. To stop in a number of minutes, set voting to scheduled, set startAt to now if it is still in the future, and set stopAt to that many minutes from now.", example: "2026-05-01T23:00:00-07:00", pattern: TIMESTAMP, patternMessage: TIMESTAMP_MESSAGE, format: "date-time" },
-    voting: votingField,
+    sortOrder: { type: "integer", description: "Position among this event's polls. Lower numbers come first. Defaults to the next position. To set the whole list in one call, use reorderPolls instead of patching this field on each poll.", example: 0, minimum: 0, maximum: 10000 },
+    startAt: { type: "string", description: "When this poll opens. Defaults to the event startAt. To open it now, set this to the current time. The close time must stay after it.", example: "2026-05-01T18:00:00-07:00", pattern: TIMESTAMP, patternMessage: TIMESTAMP_MESSAGE, format: "date-time" },
+    stopAt: { type: "string", description: "When this poll closes. Defaults to the event stopAt. To close it now, set this to the current time. To close it in a number of minutes, set this that far ahead. If the open time is still in the future, set startAt to now as well so the window stays valid.", example: "2026-05-01T23:00:00-07:00", pattern: TIMESTAMP, patternMessage: TIMESTAMP_MESSAGE, format: "date-time" },
   },
   refine: (value, mode) => ({ ...selectionOrder(value, mode), ...dateOrder(value) }),
 };
@@ -138,7 +129,6 @@ export const pollPatch: ObjectSchema = {
     sortOrder: pollWrite.fields.sortOrder,
     startAt: pollWrite.fields.startAt,
     stopAt: pollWrite.fields.stopAt,
-    voting: votingField,
   },
   refine: (value, mode) => ({ ...selectionOrder(value, mode), ...dateOrder(value) }),
 };
@@ -164,9 +154,9 @@ export const optionPatch: ObjectSchema = {
 };
 
 export const pollOrder: ObjectSchema = {
-  description: "The complete poll order for one screening. slugs lists every poll slug on that screening exactly once, first to last. The first slug becomes sortOrder 0.",
+  description: "The complete poll order for one event. slugs lists every poll slug on that event exactly once, first to last. The first slug becomes sortOrder 0.",
   fields: {
-    slugs: { type: "stringArray", required: true, description: "Every poll slug on this screening, in the order they should appear. Omit none, and list none twice.", example: ["best-film", "best-poster"], minItems: 0, maxItems: 200, itemMinLength: 1, itemMaxLength: 64, itemPattern: SLUG, itemPatternMessage: SLUG_MESSAGE },
+    slugs: { type: "stringArray", required: true, description: "Every poll slug on this event, in the order they should appear. Omit none, and list none twice.", example: ["best-film", "best-poster"], minItems: 0, maxItems: 200, itemMinLength: 1, itemMaxLength: 64, itemPattern: SLUG, itemPatternMessage: SLUG_MESSAGE },
   },
   refine: (value) => uniqueItems(value, "slugs"),
 };
@@ -189,7 +179,7 @@ export const voteCodeGenerate: ObjectSchema = {
 export const examples = {
   screeningCreate: {
     slug: "spring-screening",
-    title: "Spring Screening",
+    title: "Spring Event",
     venue: "Practice Theater",
     timezone: "America/Los_Angeles",
     startAt: "2026-05-01T18:00:00-07:00",
@@ -341,20 +331,20 @@ const requestSchemas = {
 
 export const adminRoutes: AdminRoute[] = [
   { method: "GET", parts: [], operationId: "getAdminIndex", summary: "Discover admin operations", description: "Start here after authenticating. Follow workflows.createScreening in order to publish a ballot without guessing field names. Follow workflows.reorder to set poll and option order in one request each.", response: "AdminIndex", status: 200 },
-  { method: "GET", parts: ["screenings"], operationId: "listScreenings", summary: "List screenings", description: "Each item links to the screening, its polls, image upload, vote codes, and results.", response: "ScreeningList", status: 200 },
-  { method: "POST", parts: ["screenings"], operationId: "createScreening", summary: "Create a screening", description: "Create the screening, then upload images, add polls and options, and generate vote codes. A duplicate slug returns 409.", body: "ScreeningWrite", response: "Screening", status: 201 },
-  { method: "GET", parts: ["screenings", ":slug"], operationId: "getScreening", summary: "Read a screening", description: "Returns the screening with its polls and options.", response: "Screening", status: 200 },
-  { method: "PATCH", parts: ["screenings", ":slug"], operationId: "updateScreening", summary: "Update a screening", description: "Changes only the fields you send. Set bannerImageKey to a key from uploadScreeningImage, or null to remove the banner. Voting is controlled on each poll.", body: "ScreeningPatch", response: "Screening", status: 200 },
-  { method: "DELETE", parts: ["screenings", ":slug"], operationId: "deleteScreening", summary: "Delete a screening", description: "Deletes the screening, its polls, options, vote codes, and votes, then deletes images stored for that screening.", response: "Deleted", status: 200 },
+  { method: "GET", parts: ["screenings"], operationId: "listScreenings", summary: "List events", description: "Each item links to the event, its polls, image upload, vote codes, and results.", response: "ScreeningList", status: 200 },
+  { method: "POST", parts: ["screenings"], operationId: "createScreening", summary: "Create an event", description: "Create the event, then upload images, add polls and options, and generate vote codes. A duplicate slug returns 409.", body: "ScreeningWrite", response: "Screening", status: 201 },
+  { method: "GET", parts: ["screenings", ":slug"], operationId: "getScreening", summary: "Read an event", description: "Returns the event with its polls and options.", response: "Screening", status: 200 },
+  { method: "PATCH", parts: ["screenings", ":slug"], operationId: "updateScreening", summary: "Update an event", description: "Changes only the fields you send. Set bannerImageKey to a key from uploadScreeningImage, or null to remove the banner. Voting is controlled on each poll.", body: "ScreeningPatch", response: "Screening", status: 200 },
+  { method: "DELETE", parts: ["screenings", ":slug"], operationId: "deleteScreening", summary: "Delete an event", description: "Deletes the event, its polls, options, vote codes, and votes, then deletes images stored for that event.", response: "Deleted", status: 200 },
   { method: "GET", parts: ["screenings", ":slug", "results"], operationId: "getScreeningResults", summary: "Read vote results", description: "Totals selections for each option. A vote code counts for a poll only when its saved pick count is between that poll's minSelections and maxSelections. Polls stay in ballot order. Options within a poll are ordered by vote count, then ballot order. ballots is the number of distinct vote codes that count for at least one poll. A poll's votes can exceed ballots when that poll allows more than one selection. Options with no votes are included. now is the server time. Each poll includes its voting window. The results page requests this about every 3 seconds while it is open.", response: "ScreeningResults", status: 200 },
   { method: "GET", parts: ["screenings", ":slug", "polls"], operationId: "listPolls", summary: "List polls", description: "Polls are ordered by sortOrder, then title. Each poll includes its options.", response: "PollList", status: 200 },
-  { method: "POST", parts: ["screenings", ":slug", "polls"], operationId: "createPoll", summary: "Create a poll", description: "Add a poll to a screening. A duplicate poll slug within the screening returns 409.", body: "PollWrite", response: "Poll", status: 201 },
+  { method: "POST", parts: ["screenings", ":slug", "polls"], operationId: "createPoll", summary: "Create a poll", description: "Add a poll to an event. A duplicate poll slug within the event returns 409.", body: "PollWrite", response: "Poll", status: 201 },
   { method: "GET", parts: ["screenings", ":slug", "polls", ":pollSlug"], operationId: "getPoll", summary: "Read a poll", description: "Returns one poll and its options.", response: "Poll", status: 200 },
-  { method: "PATCH", parts: ["screenings", ":slug", "polls", ":pollSlug"], operationId: "updatePoll", summary: "Update a poll", description: "Changes only the fields you send. When both selection bounds are present, maxSelections must be at least minSelections. When only one is sent, it is checked against the stored value of the other. Set voting to open or closed to start or stop this poll immediately, or scheduled to follow its startAt and stopAt. To stop in a number of minutes, set voting to scheduled and stopAt to that time. If startAt is still in the future, set it to now so the poll stays open until the new stopAt. To reorder every poll at once, use reorderPolls.", body: "PollPatch", response: "Poll", status: 200 },
+  { method: "PATCH", parts: ["screenings", ":slug", "polls", ":pollSlug"], operationId: "updatePoll", summary: "Update a poll", description: "Changes only the fields you send. When both selection bounds are present, maxSelections must be at least minSelections. When only one is sent, it is checked against the stored value of the other. Voting follows startAt and stopAt. To open now, set startAt to the current time. To close now, set stopAt to the current time. To close in a number of minutes, set stopAt that far ahead, and set startAt to now when the open time is still in the future. To reorder every poll at once, use reorderPolls.", body: "PollPatch", response: "Poll", status: 200 },
   { method: "DELETE", parts: ["screenings", ":slug", "polls", ":pollSlug"], operationId: "deletePoll", summary: "Delete a poll", description: "Deletes the poll, its options, and votes cast in that poll. Uploaded images stay in storage so other options can keep using them.", response: "Deleted", status: 200 },
-  { method: "PUT", parts: ["screenings", ":slug", "polls", "order"], operationId: "reorderPolls", summary: "Reorder polls", description: "Sets the ballot order of every poll on this screening in one request. slugs must list each poll slug exactly once, first to last. The response polls are in that order. This is the call an agent uses instead of dragging.", body: "PollOrder", response: "PollList", status: 200 },
+  { method: "PUT", parts: ["screenings", ":slug", "polls", "order"], operationId: "reorderPolls", summary: "Reorder polls", description: "Sets the ballot order of every poll on this event in one request. slugs must list each poll slug exactly once, first to last. The response polls are in that order. This is the call an agent uses instead of dragging.", body: "PollOrder", response: "PollList", status: 200 },
   { method: "GET", parts: ["screenings", ":slug", "polls", ":pollSlug", "options"], operationId: "listOptions", summary: "List options", description: "Options are ordered by sortOrder, then title.", response: "OptionList", status: 200 },
-  { method: "POST", parts: ["screenings", ":slug", "polls", ":pollSlug", "options"], operationId: "createOption", summary: "Create an option", description: "imageKeys must already have been uploaded to this screening. The response id is what voters save.", body: "OptionWrite", response: "Option", status: 201 },
+  { method: "POST", parts: ["screenings", ":slug", "polls", ":pollSlug", "options"], operationId: "createOption", summary: "Create an option", description: "imageKeys must already have been uploaded to this event. The response id is what voters save.", body: "OptionWrite", response: "Option", status: 201 },
   { method: "GET", parts: ["screenings", ":slug", "polls", ":pollSlug", "options", ":optionId"], operationId: "getOption", summary: "Read an option", description: "Returns one option.", response: "Option", status: 200 },
   { method: "PATCH", parts: ["screenings", ":slug", "polls", ":pollSlug", "options", ":optionId"], operationId: "updateOption", summary: "Update an option", description: "Changes only the fields you send. imageKeys replaces the entire still list. To reorder every option on this poll at once, use reorderOptions.", body: "OptionPatch", response: "Option", status: 200 },
   { method: "DELETE", parts: ["screenings", ":slug", "polls", ":pollSlug", "options", ":optionId"], operationId: "deleteOption", summary: "Delete an option", description: "Deletes the option and votes for it. Uploaded images stay in storage.", response: "Deleted", status: 200 },
@@ -362,8 +352,8 @@ export const adminRoutes: AdminRoute[] = [
   { method: "POST", parts: ["screenings", ":slug", "images"], operationId: "uploadScreeningImage", summary: "Upload an image", description: "Send the raw image bytes. Set Content-Type to an allowed image type and X-Filename to the basename. The response key is what you store as bannerImageKey or in imageKeys. Uploading the same filename again replaces the object.", response: "ImageCreated", status: 201 },
   { method: "GET", parts: ["screenings", ":slug", "codes"], operationId: "getVoteCodes", summary: "List vote codes", description: "Returns every code whose text was stored, in code order, plus counts. used on a code is true after that code has saved a pick. The same code can change polls that are still open. unlisted counts older rows that still work but have no saved text, so they are omitted from codes. Each code's public entry URL is https://vote.sandiego48.com/c/{code}.", response: "CodeList", status: 200 },
   { method: "POST", parts: ["screenings", ":slug", "codes"], operationId: "generateVoteCodes", summary: "Generate vote codes", description: "Creates count new codes and returns them in created. A code is unique across the site. The text is stored for download. Voting compares a SHA-256 hash, and spaces and hyphens in what the voter types are ignored.", body: "VoteCodeGenerate", response: "CodeGenerateResult", status: 200 },
-  { method: "DELETE", parts: ["screenings", ":slug", "codes"], operationId: "deleteVoteCodes", summary: "Delete unused vote codes", description: "Removes every unused code for this screening. Send no body. Used codes stay, and votes are not deleted. deleted is how many rows were removed.", response: "CodeDeleteResult", status: 200 },
-  { method: "POST", parts: ["screenings", ":slug", "reset"], operationId: "resetVoting", summary: "Reset voting", description: "Deletes every vote and every vote code for this screening. Polls, options, images, and the voting schedule stay. Send no body. codes is how many vote codes were removed. votes is how many stored picks were removed.", response: "VotingReset", status: 200 },
+  { method: "DELETE", parts: ["screenings", ":slug", "codes"], operationId: "deleteVoteCodes", summary: "Delete unused vote codes", description: "Removes every unused code for this event. Send no body. Used codes stay, and votes are not deleted. deleted is how many rows were removed.", response: "CodeDeleteResult", status: 200 },
+  { method: "POST", parts: ["screenings", ":slug", "reset"], operationId: "resetVoting", summary: "Reset voting", description: "Deletes every vote and every vote code for this event. Polls, options, images, and the voting schedule stay. Send no body. codes is how many vote codes were removed. votes is how many stored picks were removed.", response: "VotingReset", status: 200 },
 ];
 
 export function adminPath(route: AdminRoute) {
@@ -414,7 +404,7 @@ export function adminIndex() {
     },
     workflows: {
       createScreening: [
-        { step: "Create the screening.", method: "POST", href: "/api/admin/screenings", operationId: "createScreening" },
+        { step: "Create the event.", method: "POST", href: "/api/admin/screenings", operationId: "createScreening" },
         { step: "Upload each still and the banner. Keep the key from each response.", method: "POST", href: "/api/admin/screenings/{slug}/images", operationId: "uploadScreeningImage" },
         { step: "Attach the banner by patching bannerImageKey.", method: "PATCH", href: "/api/admin/screenings/{slug}", operationId: "updateScreening" },
         { step: "Add each poll.", method: "POST", href: "/api/admin/screenings/{slug}/polls", operationId: "createPoll" },
@@ -423,7 +413,7 @@ export function adminIndex() {
         { step: "Download every stored code, including ones generated earlier.", method: "GET", href: "/api/admin/screenings/{slug}/codes", operationId: "getVoteCodes" },
       ],
       reorder: [
-        { step: "Replace the poll order. slugs lists every poll slug on the screening, first to last.", method: "PUT", href: "/api/admin/screenings/{slug}/polls/order", operationId: "reorderPolls" },
+        { step: "Replace the poll order. slugs lists every poll slug on the event, first to last.", method: "PUT", href: "/api/admin/screenings/{slug}/polls/order", operationId: "reorderPolls" },
         { step: "Replace one poll's option order. ids lists every option id on that poll, first to last.", method: "PUT", href: "/api/admin/screenings/{slug}/polls/{pollSlug}/options/order", operationId: "reorderOptions" },
       ],
     },
@@ -491,26 +481,26 @@ const errorSchema = {
 const votingFields = {
   startAt: { type: "string", format: "date-time", description: "When this poll opens if voting is scheduled." },
   stopAt: { type: "string", format: "date-time", description: "When this poll closes if voting is scheduled." },
-  voting: { type: "string", enum: ["scheduled", "open", "closed"], description: "scheduled follows this poll's startAt and stopAt. open stores picks until changed. closed leaves picks unchanged until changed." },
+  voting: { type: "string", enum: ["scheduled", "open", "closed"], description: "Earlier rows may say open or closed. Those values do not override the window. A poll accepts picks only from startAt until stopAt." },
   votingOpen: { type: "boolean", description: "Whether a pick saved at this response would be stored." },
 };
 
 export function openapiDocument() {
   const paths: Record<string, Record<string, unknown>> = {};
   for (const route of adminRoutes) addPath(paths, adminPath(route), route.method, adminOperation(route));
-  addPath(paths, "/api", "GET", publicOperation("getApiIndex", "Discover the API", "Public entry point. Follow links.openapi, then links.admin for screening setup.", "PublicIndex", { "405": "Use GET." }));
+  addPath(paths, "/api", "GET", publicOperation("getApiIndex", "Discover the API", "Public entry point. Follow links.openapi, then links.admin for event setup.", "PublicIndex", { "405": "Use GET." }));
   addPath(paths, "/api/openapi.json", "GET", publicOperation("getOpenApi", "OpenAPI document", "Machine-readable contract for the public and admin APIs.", "OpenApiDocument", { "405": "Use GET." }));
   addPath(paths, "/api/enter", "POST", {
-    ...publicOperation("enterWithCode", "Open a ballot with a vote code", "Trims and uppercases the code, hashes it, and returns the screening slug when that code exists. A code that already voted still enters, and selections lists its current option ids by poll id. Does not check whether polls are open. The same entry is what /c/{code} performs. The response is an error string, not field names.", "EnterResult", {
+    ...publicOperation("enterWithCode", "Open a ballot with a vote code", "Trims and uppercases the code, hashes it, and returns the event slug when that code exists. A code that already voted still enters, and selections lists its current option ids by poll id. Does not check whether polls are open. The same entry is what /c/{code} performs. The response is an error string, not field names.", "EnterResult", {
       "400": "The body is not JSON or the code is empty.",
       "403": "No vote code matches.",
     }),
     requestBody: jsonBody("EnterRequest", false),
   });
   addPath(paths, "/api/vote", "POST", {
-    ...publicOperation("castVote", "Save picks", "One code covers every poll in the screening. selections maps each poll id being saved to its current option ids. Only those polls are replaced. Each poll stores picks on its own: voting open always stores them, voting closed leaves them unchanged, and voting scheduled stores them only while the request time is within that poll's startAt and stopAt. Minimum and maximum selections are not checked here. Results include a code's picks for a poll only when the saved count is inside that range. The code is marked used on the first saved change. Overlapping saves of the same code can both be recorded. A successful save, and a save rejected because voting is not open, includes now, polls, and selections for the code after the write. Other errors are a single error string.", "VoteResult", {
-      "400": "screeningId, code, or selections is missing, a poll id is not on this screening, or an option id is not on that poll.",
-      "403": "The code is not on this screening, or none of the polls being saved are open.",
+    ...publicOperation("castVote", "Save picks", "One code covers every poll in the event. selections maps each poll id being saved to its current option ids. Only those polls are replaced. A poll stores picks only while the request time is within that poll's startAt and stopAt. Minimum and maximum selections are not checked here. Results include a code's picks for a poll only when the saved count is inside that range. The code is marked used on the first saved change. Overlapping saves of the same code can both be recorded. A successful save, and a save rejected because voting is not open, includes now, polls, and selections for the code after the write. Other errors are a single error string.", "VoteResult", {
+      "400": "screeningId, code, or selections is missing, a poll id is not on this event, or an option id is not on that poll.",
+      "403": "The code is not on this event, or none of the polls being saved are open.",
     }),
     requestBody: jsonBody("VoteRequest", false),
   });
@@ -522,8 +512,8 @@ export function openapiDocument() {
     requestBody: jsonBody("EnterRequest", false),
   });
   addPath(paths, "/api/screenings/{slug}", "GET", {
-    ...publicOperation("getPublicScreening", "Read a public ballot", "Returns the screening voters see. No vote code is required. Image fields are public asset URLs. The HTML page at /s/{slug} is a separate gate and sends the browser back to / unless this session entered a code for that slug.", "PublicScreening", { "404": "No screening uses this slug." }),
-    parameters: [pathParam("slug", "Screening slug.")],
+    ...publicOperation("getPublicScreening", "Read a public ballot", "Returns the event voters see. No vote code is required. Image fields are public asset URLs. The HTML page at /s/{slug} is a separate gate and sends the browser back to / unless this session entered a code for that slug.", "PublicScreening", { "404": "No event uses this slug." }),
+    parameters: [pathParam("slug", "Event slug.")],
   });
   addPath(paths, "/api/assets/{path}", "GET", publicOperation("getAsset", "Read an uploaded image", "path is the storage key with each segment encoded. The response Content-Type is the stored image type. SVG responses include a sandbox Content-Security-Policy. Cache-Control is public, max-age=3600, so replacing a file can stay cached for an hour. Admin resources return a ready-to-use url, so callers do not need to build this path.", "Asset", { "404": "No object is stored at this key." }));
 
@@ -532,7 +522,7 @@ export function openapiDocument() {
     info: {
       title: "San Diego 48 voting API",
       version: "0.1.0",
-      description: "Start at GET /api. To create a screening and its polls, authenticate and follow the workflow on GET /api/admin. Field names, required values, and errors are defined by this document. The admin UI at /admin calls these same routes.",
+      description: "Start at GET /api. To create an event and its polls, authenticate and follow the workflow on GET /api/admin. Field names, required values, and errors are defined by this document. The admin UI at /admin calls these same routes. The admin and ballot call this an event. Paths and JSON fields still say screening.",
     },
     servers: [{ url: "/" }],
     tags: [
@@ -561,7 +551,7 @@ export function openapiDocument() {
         ImageConfig: imageConfigSchema,
         Error: errorSchema,
         PublicIndex: { type: "object", description: "Public discovery document returned by GET /api." },
-        AdminIndex: { type: "object", description: "Admin discovery document. workflows.createScreening is the supported order of calls for a new screening. workflows.reorder replaces poll and option order in one request each." },
+        AdminIndex: { type: "object", description: "Admin discovery document. workflows.createScreening is the supported order of calls for a new event. workflows.reorder replaces poll and option order in one request each." },
         OpenApiDocument: { type: "object" },
         ScreeningList: { type: "object", required: ["screenings"], properties: { screenings: { type: "array", items: { $ref: "#/components/schemas/ScreeningSummary" } } } },
         ScreeningSummary: resourceSchema(["id", "slug", "title", "venue", "timezone", "startAt", "stopAt", "bannerImageKey", "bannerImage", "links"]),
@@ -614,7 +604,7 @@ export function openapiDocument() {
           type: "object",
           required: ["total", "used", "unused", "unlisted", "codes"],
           properties: {
-            total: { type: "integer", description: "Codes on this screening, including ones with no saved text." },
+            total: { type: "integer", description: "Codes on this event, including ones with no saved text." },
             used: { type: "integer", description: "Codes that have already voted." },
             unused: { type: "integer", description: "Codes that have not voted." },
             unlisted: { type: "integer", description: "Older codes with no saved text. They still work and are omitted from codes." },
@@ -658,7 +648,7 @@ export function openapiDocument() {
         Deleted: { type: "object", required: ["deleted"], properties: { deleted: { type: "boolean" }, slug: { type: "string" }, id: { type: "string" } } },
         EnterRequest: { type: "object", required: ["code"], additionalProperties: false, properties: { code: { type: "string", description: "Vote code printed on the ticket. Leading and trailing spaces are ignored and letters are compared in uppercase.", examples: ["TEST-1001"] } } },
         EnterResult: { type: "object", required: ["slug", "title", "used", "selections"], properties: { slug: { type: "string" }, title: { type: "string" }, used: { type: "boolean", description: "True after this code has saved a pick." }, selections: { type: "object", additionalProperties: { type: "array", items: { type: "string" } }, description: "Current option ids by poll id, including picks outside the minimum and maximum. Empty when the code has not voted." }, error: { type: "string" } } },
-        VoteRequest: { type: "object", required: ["screeningId", "code", "selections"], additionalProperties: false, properties: { screeningId: { type: "string", description: "Screening id from GET /api/screenings/{slug}." }, code: { type: "string" }, selections: { type: "object", additionalProperties: { type: "array", items: { type: "string" } }, description: "Map of poll id to chosen option ids." } } },
+        VoteRequest: { type: "object", required: ["screeningId", "code", "selections"], additionalProperties: false, properties: { screeningId: { type: "string", description: "Event id from GET /api/screenings/{slug}. The field name is screeningId." }, code: { type: "string" }, selections: { type: "object", additionalProperties: { type: "array", items: { type: "string" } }, description: "Map of poll id to chosen option ids." } } },
         VoteResult: { type: "object", properties: { ok: { type: "boolean" }, error: { type: "string" }, now: { type: "string", format: "date-time" }, polls: { type: "array", items: { $ref: "#/components/schemas/BallotPoll" } }, selections: { type: "object", additionalProperties: { type: "array", items: { type: "string" } } } } },
         BallotState: { type: "object", required: ["now", "slug", "title", "screeningId", "used", "polls", "selections"], properties: { now: { type: "string", format: "date-time", description: "Server time when this snapshot was read." }, slug: { type: "string" }, title: { type: "string" }, screeningId: { type: "string" }, used: { type: "boolean" }, polls: { type: "array", items: { $ref: "#/components/schemas/BallotPoll" } }, selections: { type: "object", additionalProperties: { type: "array", items: { type: "string" } }, description: "Stored option ids by poll id, including a count outside the minimum and maximum." } } },
         BallotPoll: { type: "object", required: ["id", "voting", "votingOpen", "startAt", "stopAt"], properties: { id: { type: "string" }, voting: { type: "string", enum: ["scheduled", "open", "closed"] }, votingOpen: { type: "boolean", description: "Whether a pick saved at this response would be stored." }, startAt: { type: "string", format: "date-time" }, stopAt: { type: "string", format: "date-time" } } },

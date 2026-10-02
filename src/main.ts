@@ -64,14 +64,13 @@ function loadEntry(): Entry | null {
 function saveEntry(entry: Entry) { sessionStorage.setItem(entryKey, JSON.stringify(entry)); }
 function clearEntry() { sessionStorage.removeItem(entryKey); }
 function brandHeader(hasHero = false) { return `<header class="masthead${hasHero ? " has-hero" : ""}"><a class="logo-link" href="/"><img class="logo" src="/logo-horiz-trans.png" alt="San Diego 48 Hour Film Project" width="2046" height="560"></a></header>`; }
-function unavailable(message: string) { app.innerHTML = `${brandHeader()}<main class="home"><section class="intro"><h1>${esc(message)}</h1><p>Check the code on your screening ticket, then start again from the home page.</p><p><a class="change-code" href="/">Enter a vote code</a></p></section></main>`; }
+function unavailable(message: string) { app.innerHTML = `${brandHeader()}<main class="home"><section class="intro"><h1>${esc(message)}</h1><p>Check the code on your event ticket, then start again from the home page.</p><p><a class="change-code" href="/">Enter a vote code</a></p></section></main>`; }
 function frameRatio(value?: string) { const match = /^(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)$/.exec(value || ""); return match ? `${match[1]} / ${match[2]}` : "16 / 9"; }
 function cycleSeconds(value: unknown) { const seconds = typeof value === "number" ? value : Number(value); return Number.isInteger(seconds) && seconds >= 1 && seconds <= 60 ? seconds : 2; }
 function pollOpen(poll: Poll) { return poll.votingOpen === true; }
 function serverNow() { return Date.now() + skewMs; }
 
 function notStarted(poll: Poll) {
-  if (poll.voting === "open" || poll.voting === "closed") return false;
   const start = Date.parse(poll.startAt);
   return Number.isFinite(start) && serverNow() < start;
 }
@@ -207,9 +206,7 @@ function watchVoting() {
 }
 
 function freshenScheduled(poll: Poll) {
-  if (poll.voting === "open") poll.votingOpen = true;
-  else if (poll.voting === "closed") poll.votingOpen = false;
-  else poll.votingOpen = votingOpen(poll.voting, poll.startAt, poll.stopAt, serverNow());
+  poll.votingOpen = votingOpen(poll.startAt, poll.stopAt, serverNow());
 }
 
 function paintWindow(poll: Poll) {
@@ -264,7 +261,7 @@ function syncCountdowns() {
       clockStops.delete(poll.id);
       clockKeys.delete(poll.id);
       const when = formatTime(poll.stopAt);
-      if (windowEl && pollOpen(poll) && poll.voting === "scheduled" && when) {
+      if (windowEl && pollOpen(poll) && when) {
         windowEl.hidden = false;
         windowEl.className = "window";
         windowEl.textContent = `Voting ends at ${when}`;
@@ -397,12 +394,12 @@ async function enter(code: string) {
 
 async function loadScreening(screeningSlug: string) {
   const response = await fetch("/api/screenings/" + encodeURIComponent(screeningSlug));
-  if (!response.ok) throw Error("Screening not found");
+  if (!response.ok) throw Error("Event not found");
   return response.json() as Promise<Screening>;
 }
 
 function renderGate(message = "", code = "") {
-  app.innerHTML = `${brandHeader()}<main class="home"><section class="intro"><span class="kicker">Audience choice</span><h1>Enter your vote code.</h1><p>The code on your screening ticket opens the ballot for that screening.</p></section><form id="code-gate" class="gate"><div class="callout"><label class="code-label">Vote code<input id="code" required autocomplete="one-time-code" autocapitalize="characters" placeholder="AB234" value="${esc(code)}" autofocus /></label><button class="button primary" type="submit">Continue <span>→</span></button></div><p class="message${message ? " error" : ""}" role="status">${esc(message)}</p></form></main>`;
+  app.innerHTML = `${brandHeader()}<main class="home"><section class="intro"><span class="kicker">Audience choice</span><h1>Enter your vote code.</h1><p>The code on your event ticket opens the ballot for that event.</p></section><form id="code-gate" class="gate"><div class="callout"><label class="code-label">Vote code<input id="code" required autocomplete="one-time-code" autocapitalize="characters" placeholder="AB234" value="${esc(code)}" autofocus /></label><button class="button primary" type="submit">Continue <span>→</span></button></div><p class="message${message ? " error" : ""}" role="status">${esc(message)}</p></form></main>`;
   const form = document.querySelector<HTMLFormElement>("#code-gate")!;
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -450,7 +447,7 @@ async function openScreening() {
     startStatePoll();
   } catch (err) {
     if (err instanceof Error && /recognized|could not be checked/i.test(err.message)) renderGate(err.message, entry.code);
-    else unavailable("Screening not found");
+    else unavailable("Event not found");
   }
 }
 

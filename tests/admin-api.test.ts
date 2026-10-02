@@ -3,7 +3,7 @@ import { keyBelongs, safeFilename } from "../functions/admin/images";
 import { imageCycleSeconds, parseImageConfig, presentOption, presentPoll, presentScreening } from "../functions/admin/present";
 import { normalizeCode, randomCode } from "../functions/codes";
 import { adminIndex, adminPath, adminRoutes, examples, matchAdminRoute, openapiDocument, optionOrder, optionWrite, pollOrder, pollPatch, pollWrite, publicIndex, screeningPatch, screeningWrite, validateObject, voteCodeGenerate } from "../functions/api/schema";
-import { countdownLabel, nextVotingCue, stopInMinutes, votingOpen } from "../functions/voting";
+import { countdownLabel, nextVotingCue, startNow, stopInMinutes, stopNow, votingOpen } from "../functions/voting";
 
 describe("admin api contract", () => {
   it("publishes every admin route in the OpenAPI document", () => {
@@ -58,13 +58,11 @@ describe("admin api contract", () => {
     expect(zoomType.ok).toBe(false);
     const count = validateObject(voteCodeGenerate, { count: 0 }, "create");
     expect(count.ok).toBe(false);
-    const voting = validateObject(pollPatch, { voting: "paused" }, "patch");
+    const voting = validateObject(pollPatch, { voting: "open" }, "patch");
     expect(voting.ok).toBe(false);
-    if (!voting.ok) expect(voting.fields.voting).toMatch(/scheduled/);
-    expect(validateObject(pollPatch, { voting: "open" }, "patch").ok).toBe(true);
+    if (!voting.ok) expect(voting.fields.voting).toBe("Unknown field.");
     expect(validateObject(screeningPatch, { voting: "open" }, "patch").ok).toBe(false);
-    const created = validateObject(pollWrite, examples.pollCreate, "create");
-    expect(created.ok && created.value.voting).toBe("scheduled");
+    expect(validateObject(pollWrite, examples.pollCreate, "create").ok).toBe(true);
     const windowOrder = validateObject(pollWrite, { ...examples.pollCreate, startAt: "2026-05-01T23:00:00Z", stopAt: "2026-05-01T18:00:00Z" }, "create");
     expect(windowOrder.ok).toBe(false);
     if (!windowOrder.ok) expect(windowOrder.fields.stopAt).toMatch(/after/);
@@ -131,11 +129,9 @@ describe("admin api contract", () => {
   it("stops a poll in a number of minutes and counts down only near the boundary", () => {
     const now = Date.parse("2026-05-01T20:00:00Z");
     const kept = stopInMinutes("2026-05-01T18:00:00Z", 5, now);
-    expect(kept.voting).toBe("scheduled");
-    expect(Date.parse(kept.stopAt) - now).toBe(5 * 60 * 1000);
-    expect(Date.parse(kept.startAt)).toBe(Date.parse("2026-05-01T18:00:00Z"));
+    expect(kept).toEqual({ stopAt: new Date(now + 5 * 60 * 1000).toISOString() });
     const opened = stopInMinutes("2026-05-01T21:00:00Z", 10, now);
-    expect(Date.parse(opened.startAt)).toBe(now);
+    expect(opened.startAt && Date.parse(opened.startAt)).toBe(now);
     expect(Date.parse(opened.stopAt) - now).toBe(10 * 60 * 1000);
     const polls = [
       { title: "Best Film", voting: "scheduled", startAt: "2026-05-01T20:00:00Z", stopAt: "2026-05-01T21:00:00Z" },
@@ -146,21 +142,28 @@ describe("admin api contract", () => {
     expect(starting?.kind).toBe("start");
     expect(starting && countdownLabel(starting, 2)).toBe("Voting starts in");
     expect(nextVotingCue(polls, Date.parse("2026-05-01T20:56:00Z"))?.kind).toBe("end");
-    expect(nextVotingCue([{ ...polls[0], voting: "open" }], Date.parse("2026-05-01T20:56:00Z"))).toBeNull();
-    expect(nextVotingCue([{ ...polls[0], voting: "closed" }], Date.parse("2026-05-01T19:56:00Z"))).toBeNull();
+    expect(nextVotingCue([{ ...polls[0], voting: "open" }], Date.parse("2026-05-01T20:56:00Z"))?.kind).toBe("end");
+    expect(nextVotingCue([{ ...polls[0], voting: "closed" }], Date.parse("2026-05-01T19:56:00Z"))?.kind).toBe("start");
     expect(countdownLabel({ at: now, kind: "end", titles: ["Best Film"] }, 2)).toBe("Best Film voting ends in");
   });
 
-  it("opens voting on a manual start and closes it on a manual stop", () => {
+  it("opens and closes a poll by its times", () => {
     const start = "2026-05-01T18:00:00-07:00";
     const stop = "2026-05-01T23:00:00-07:00";
     const during = Date.parse("2026-05-01T20:00:00-07:00");
     const before = Date.parse("2026-05-01T12:00:00-07:00");
-    expect(votingOpen("scheduled", start, stop, during)).toBe(true);
-    expect(votingOpen("scheduled", start, stop, before)).toBe(false);
-    expect(votingOpen("open", start, stop, before)).toBe(true);
-    expect(votingOpen("closed", start, stop, during)).toBe(false);
-    expect(votingOpen(undefined, start, stop, during)).toBe(true);
+    expect(votingOpen(start, stop, during)).toBe(true);
+    expect(votingOpen(start, stop, before)).toBe(false);
+    expect(votingOpen(start, stop, Date.parse(stop))).toBe(false);
+    const started = startNow(before);
+    expect(Date.parse(started.startAt)).toBe(before);
+    expect(votingOpen(started.startAt, stop, before)).toBe(true);
+    const ended = stopNow(start, during);
+    expect(ended).toEqual({ stopAt: new Date(during).toISOString() });
+    expect(votingOpen(start, ended.stopAt, during)).toBe(false);
+    const held = stopNow("2026-05-01T23:00:00Z", Date.parse("2026-05-01T20:00:00Z"));
+    expect(Date.parse(held.stopAt || "")).toBe(Date.parse("2026-05-01T20:00:00Z"));
+    expect(Date.parse(held.startAt || "")).toBe(Date.parse("2026-05-01T20:00:00Z") - 1000);
   });
 
   it("rejects traversal in image keys and keeps only a safe basename", () => {

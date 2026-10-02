@@ -21,27 +21,34 @@ export function votingMode(value: string | null | undefined): VotingMode {
   return value === "open" || value === "closed" ? value : "scheduled";
 }
 
-export function votingOpen(mode: string | null | undefined, startAt: string, stopAt: string, now = Date.now()) {
-  const voting = votingMode(mode);
-  if (voting === "open") return true;
-  if (voting === "closed") return false;
+export function votingOpen(startAt: string, stopAt: string, now = Date.now()) {
   const start = Date.parse(startAt);
   const stop = Date.parse(stopAt);
-  return now >= start && now <= stop;
+  return Number.isFinite(start) && Number.isFinite(stop) && now >= start && now < stop;
+}
+
+export function startNow(now = Date.now()) {
+  return { startAt: new Date(now).toISOString() };
+}
+
+export function stopNow(startAt: string, now = Date.now()) {
+  const stopAt = new Date(now).toISOString();
+  const startMs = Date.parse(startAt);
+  if (Number.isFinite(startMs) && startMs >= now) return { startAt: new Date(now - 1000).toISOString(), stopAt };
+  return { stopAt };
 }
 
 export function stopInMinutes(startAt: string, minutes: number, now = Date.now()) {
   const stopAt = new Date(now + minutes * 60_000).toISOString();
   const startMs = Date.parse(startAt);
-  const start = Number.isFinite(startMs) && startMs < now ? new Date(startMs).toISOString() : new Date(now).toISOString();
-  return { voting: "scheduled" as const, startAt: start, stopAt };
+  if (Number.isFinite(startMs) && startMs > now) return { startAt: new Date(now).toISOString(), stopAt };
+  return { stopAt };
 }
 
 export function nextVotingCue(polls: VotingPoll[], now = Date.now()): VotingCue | null {
   let best: VotingCue | null = null;
   const groups = new Map<string, VotingCue>();
   for (const poll of polls) {
-    if (votingMode(poll.voting) !== "scheduled") continue;
     const start = Date.parse(poll.startAt);
     const stop = Date.parse(poll.stopAt);
     if (!Number.isFinite(start) || !Number.isFinite(stop)) continue;

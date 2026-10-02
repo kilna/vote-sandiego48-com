@@ -98,7 +98,7 @@ export function presentPoll(screeningSlug: string, row: PollRow, options: Return
     startAt,
     stopAt,
     voting: votingMode(row.voting),
-    votingOpen: Boolean(startAt && stopAt && votingOpen(row.voting, startAt, stopAt)),
+    votingOpen: Boolean(startAt && stopAt && votingOpen(startAt, stopAt)),
     options,
     links: {
       self: `/api/admin/screenings/${slug}/polls/${pollSlug}`,

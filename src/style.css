@@ -785,7 +785,9 @@ input:not([type="radio"]):not([type="checkbox"]):focus-visible {
   background: transparent;
 }
 
-.add-toggle-row { margin: 0.35rem 0 0.9rem; }
+.add-toggle-row { margin-block: 0.35rem 0.9rem; }
+
+.add-toggle-row.is-centered { justify-content: center; }
 .poll-options .add-toggle-row { margin: 0; }
 
 .editor[hidden],
@@ -1077,12 +1079,25 @@ input:not([type="radio"]):not([type="checkbox"]):focus-visible {
   line-height: inherit;
 }
 
+.vote-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.1rem;
+}
+
 .stop-in {
   display: flex;
   flex-wrap: wrap;
-  align-items: end;
-  gap: 0.75rem;
+  align-items: center;
+  gap: 0.45rem 0.55rem;
+  margin: 0;
+  color: var(--48-navy);
+  font-weight: 800;
 }
 
-.stop-in label { max-width: 8rem; }
+.stop-in input[type="number"] {
+  width: 4.75rem;
+  padding: 0.45rem 0.55rem;
+}
 

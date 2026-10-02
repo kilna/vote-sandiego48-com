@@ -79,7 +79,7 @@ function isUnique(err: unknown) {
 
 async function requireScreening(env: Env, slug: string): Promise<{ row: ScreeningRow } | Failure> {
   const row = await env.DB.prepare("SELECT * FROM screenings WHERE slug = ?").bind(slug).first<ScreeningRow>();
-  return row ? { row } : { response: error(404, "Screening not found.") };
+  return row ? { row } : { response: error(404, "Event not found.") };
 }
 
 async function requirePoll(env: Env, screeningId: string, pollSlug: string): Promise<{ row: PollRow } | Failure> {
@@ -119,7 +119,7 @@ async function assertKeys(env: Env, screeningId: string, keys: string[]) {
   for (const key of keys) {
     if (seen.has(key)) return `"${key}" is listed more than once.`;
     seen.add(key);
-    if (!keyBelongs(screeningId, key)) return `"${key}" is not an image of this screening. Upload it with uploadScreeningImage and use the returned key.`;
+    if (!keyBelongs(screeningId, key)) return `"${key}" is not an image of this event. Upload it with uploadScreeningImage and use the returned key.`;
     if (!await env.MEDIA.get(key)) return `"${key}" is not in storage. Upload it before attaching it.`;
   }
   return null;
@@ -145,7 +145,7 @@ async function createScreening(request: Request, env: Env) {
   try {
     await env.DB.prepare("INSERT INTO screenings (id, slug, title, venue, banner_image_key, timezone, start_at, stop_at, voting) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)").bind(id, value.slug, value.title, blankToNull(value.venue), value.timezone, value.startAt, value.stopAt, "scheduled").run();
   } catch (err) {
-    if (isUnique(err)) return error(409, "A screening with this slug already exists.", { field: "slug" });
+    if (isUnique(err)) return error(409, "An event with this slug already exists.", { field: "slug" });
     throw err;
   }
   return screeningResponse(env, String(value.slug), 201, { Location: `/api/admin/screenings/${encodeURIComponent(String(value.slug))}` });
@@ -168,7 +168,7 @@ async function updateScreening(request: Request, env: Env, slug: string) {
   if (Date.parse(stopAt) <= Date.parse(startAt)) return invalid({ stopAt: "Must be after startAt." });
   if ("bannerImageKey" in value && value.bannerImageKey != null) {
     const key = String(value.bannerImageKey);
-    if (!keyBelongs(found.row.id, key) || !await env.MEDIA.get(key)) return invalid({ bannerImageKey: "Upload the banner to this screening first and use the returned key." });
+    if (!keyBelongs(found.row.id, key) || !await env.MEDIA.get(key)) return invalid({ bannerImageKey: "Upload the banner to this event first and use the returned key." });
   }
   const columns: Record<string, string> = { slug: "slug", title: "title", venue: "venue", timezone: "timezone", startAt: "start_at", stopAt: "stop_at", bannerImageKey: "banner_image_key" };
   const keys = Object.keys(value).filter((key) => columns[key]);
@@ -176,7 +176,7 @@ async function updateScreening(request: Request, env: Env, slug: string) {
   try {
     await env.DB.prepare(`UPDATE screenings SET ${keys.map((key) => `${columns[key]} = ?`).join(", ")} WHERE id = ?`).bind(...stored, found.row.id).run();
   } catch (err) {
-    if (isUnique(err)) return error(409, "A screening with this slug already exists.", { field: "slug" });
+    if (isUnique(err)) return error(409, "An event with this slug already exists.", { field: "slug" });
     throw err;
   }
   const nextSlug = typeof value.slug === "string" ? value.slug : slug;
@@ -197,7 +197,7 @@ async function deleteScreening(env: Env, slug: string) {
   try {
     await removeImages(env, id);
   } catch {
-    return error(500, "The screening was deleted, but its images could not be removed.");
+    return error(500, "The event was deleted, but its images could not be removed.");
   }
   return json({ deleted: true, slug });
 }
@@ -232,12 +232,12 @@ async function createPoll(request: Request, env: Env, slug: string) {
   const startAt = typeof value.startAt === "string" ? value.startAt : found.row.start_at;
   const stopAt = typeof value.stopAt === "string" ? value.stopAt : found.row.stop_at;
   if (Date.parse(stopAt) <= Date.parse(startAt)) return invalid({ stopAt: "Must be after startAt." });
-  const voting = typeof value.voting === "string" ? value.voting : "scheduled";
+  const voting = "scheduled";
   const id = crypto.randomUUID();
   try {
     await env.DB.prepare("INSERT INTO polls (id, screening_id, slug, title, instructions, min_selections, max_selections, image_config, sort_order, voting, start_at, stop_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(id, found.row.id, value.slug, value.title, blankToNull(value.instructions), value.minSelections, value.maxSelections, JSON.stringify(value.imageConfig), sortOrder, voting, startAt, stopAt).run();
   } catch (err) {
-    if (isUnique(err)) return error(409, "A poll with this slug already exists on the screening.", { field: "slug" });
+    if (isUnique(err)) return error(409, "A poll with this slug already exists on the event.", { field: "slug" });
     throw err;
   }
   const poll = await requirePoll(env, found.row.id, String(value.slug));
@@ -279,7 +279,7 @@ async function updatePoll(request: Request, env: Env, slug: string, pollSlug: st
   try {
     await env.DB.prepare(`UPDATE polls SET ${keys.map((key) => `${columns[key]} = ?`).join(", ")} WHERE id = ?`).bind(...stored, poll.row.id).run();
   } catch (err) {
-    if (isUnique(err)) return error(409, "A poll with this slug already exists on the screening.", { field: "slug" });
+    if (isUnique(err)) return error(409, "A poll with this slug already exists on the event.", { field: "slug" });
     throw err;
   }
   const next = await requirePoll(env, found.row.id, typeof value.slug === "string" ? value.slug : pollSlug);
@@ -297,7 +297,7 @@ async function reorderPolls(request: Request, env: Env, slug: string) {
   const slugs = parsed.value.slugs as string[];
   const rows = await env.DB.prepare("SELECT id, slug FROM polls WHERE screening_id = ?").bind(found.row.id).all<{ id: string; slug: string }>();
   const ids = new Map(rows.results.map((row) => [row.slug, row.id]));
-  const mismatch = completeOrder(slugs, ids, "slugs", "List every poll on this screening exactly once.", (item) => `"${item}" is not a poll on this screening.`);
+  const mismatch = completeOrder(slugs, ids, "slugs", "List every poll on this event exactly once.", (item) => `"${item}" is not a poll on this event.`);
   if (mismatch) return invalid(mismatch);
   const statements = slugs.map((pollSlug, index) => env.DB.prepare("UPDATE polls SET sort_order = ? WHERE id = ?").bind(index, ids.get(pollSlug)));
   if (statements.length) await env.DB.batch(statements);
@@ -475,7 +475,7 @@ async function screeningResults(env: Env, slug: string) {
         title: row.poll_title,
         votes: 0,
         voting: votingMode(row.voting),
-        votingOpen: Boolean(startAt && stopAt && votingOpen(row.voting, startAt, stopAt)),
+        votingOpen: Boolean(startAt && stopAt && votingOpen(startAt, stopAt)),
         startAt,
         stopAt,
         options: [],

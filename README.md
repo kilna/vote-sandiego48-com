@@ -5,23 +5,23 @@ Cloudflare Pages + Functions voting site for `vote.sandiego48.com`.
 ## Architecture
 
 - Static frontend: Vite + TypeScript, deployed as Cloudflare Pages assets.
-- Runtime data: Cloudflare D1 (screenings, polls, options, vote codes, votes).
+- Runtime data: Cloudflare D1 (events, polls, options, vote codes, votes). The events table is still named `screenings`.
 - Images: Cloudflare R2. Each poll stores an `imageConfig` for aspect ratio, how many seconds each still stays on screen, and whether images are zoomable.
 - Admin writes go through `/api/admin`. `GET /api` links to `GET /api/openapi.json`. `GET /api/admin` lists `workflows.createScreening`.
 - `/admin` edits those same resources in the browser.
-- A vote code belongs to one screening and is unique across the site. Picks save as they change, and the same code can change a poll until that poll closes. `/c/<code>` enters the code the same way the home page does.
+- A vote code belongs to one event and is unique across the site. Picks save as they change, and the same code can change a poll until that poll closes. `/c/<code>` enters the code the same way the home page does.
 
 ## How voting works
 
 The home page, or `/c/<code>`, posts the ticket code to `POST /api/enter`. A recognized code is stored in `sessionStorage` and the browser opens `/s/<slug>`. Opening `/s/<slug>` without that session entry returns to the home page. `GET /api/screenings/<slug>` and `GET /api/assets/...` do not check the code. A code that already voted can enter again; the response includes its current selections.
 
-`POST /api/vote` stores each named poll on its own. A poll's `voting` value is `scheduled`, `open`, or `closed`. `scheduled` stores a selection only while the request time is within that poll's `startAt` and `stopAt`. `open` and `closed` start or stop that poll immediately. Closed polls stay grayed out and keep their stored selections. Open polls replace that code's previous selections for the polls in the request, including a count outside the minimum and maximum. Results include a code's picks for a poll only when the saved count is inside that range. A minimum of 0 counts a blank poll. The code is marked used on the first saved change. Entering a code does not check that state. If none of the polls being saved are open, the vote returns 403. A successful save and that 403 return the stored ballot.
+`POST /api/vote` stores each named poll on its own while the request time is within that poll's `startAt` and `stopAt`. A stored `voting` value does not open or close the poll on its own. Polls outside that window stay grayed out and keep their stored selections. Open polls replace that code's previous selections for the polls in the request, including a count outside the minimum and maximum. Results include a code's picks for a poll only when the saved count is inside that range. A minimum of 0 counts a blank poll. The code is marked used on the first saved change. Entering a code does not check that state. If none of the polls being saved are open, the vote returns 403. A successful save and that 403 return the stored ballot.
 
 The open ballot posts `POST /api/state` about every 3 seconds while the tab is visible. That response is the server clock, whether each poll is open, and the picks stored for the code. The page updates the pinned header from it, including the countdown. When those stored picks replace what the phone was showing and the count is outside the minimum and maximum, or the poll is closed with a count outside that range, the header says the saved vote does not count.
 
 The ballot frames stills with the poll's aspect ratio and fits each image inside that frame. An option with more than one still crossfades after `imageConfig.cycle` seconds, which defaults to 2. When `imageConfig.zoomable` is true, each image has a magnifier that opens it full screen. Uploaded files are not checked against the aspect ratio.
 
-The screening `timezone` is a label. The admin form reads times in the browser's timezone and stores UTC instants. The ballot formats those instants in the viewer's timezone.
+The event `timezone` is a label. The admin form reads times in the browser's timezone and stores UTC instants. The ballot formats those instants in the viewer's timezone.
 
 ## Local development
 
@@ -35,17 +35,17 @@ npm run build
 
 `npm run dev` serves the Vite frontend only. Pages Functions, D1, and R2 run under Wrangler (`wrangler pages dev`). A gitignored `.dev.vars` file can set `ACCESS_DEV_BYPASS=1` so that local process accepts admin calls on localhost. `npm test` checks the admin contract and Access JWT rules. It does not cast votes against D1.
 
-The Pages project, D1 database, R2 bucket, domain/DNS, and initial migration are configured. GitHub Actions has Cloudflare token/account secrets and a verified successful push-driven deploy. The project uses Direct Upload via Actions, not native Pages Git integration. Production has no live screening.
+The Pages project, D1 database, R2 bucket, domain/DNS, and initial migration are configured. GitHub Actions has Cloudflare token/account secrets and a verified successful push-driven deploy. The project uses Direct Upload via Actions, not native Pages Git integration. Production has no live event.
 
 ## API
 
-`GET /api` is the public entry point. It links to `GET /api/openapi.json`. An agent creating a screening calls `GET /api/admin` and follows `workflows.createScreening`. `workflows.reorder` sets poll order with `PUT /api/admin/screenings/{slug}/polls/order` and option order with `PUT /api/admin/screenings/{slug}/polls/{pollSlug}/options/order`. Each body lists every item exactly once, first to last.
+`GET /api` is the public entry point. It links to `GET /api/openapi.json`. An agent creating an event calls `GET /api/admin` and follows `workflows.createScreening`. The admin and ballot say event. API paths and JSON fields still say screening. `workflows.reorder` sets poll order with `PUT /api/admin/screenings/{slug}/polls/order` and option order with `PUT /api/admin/screenings/{slug}/polls/{pollSlug}/options/order`. Each body lists every item exactly once, first to last.
 
 People administer the site through Cloudflare Access. Agents send `CF-Access-Client-Id` and `CF-Access-Client-Secret`. Access adds `Cf-Access-Jwt-Assertion`, and the admin Functions verify that JWT. Allowed emails are any `@kilna.com` address and `sandiego@48hourfilm.com`. A service token has no email; its JWT is accepted when the signature, issuer, and audience match. Admin validation errors name the field. Public enter and vote errors are a single `error` string. Slugs, polls, options, images, and vote codes are separate resources. There is no ZIP or YAML import. Vote codes are generated by the admin API and can be downloaded. The ticket text is stored for that download, and voting compares a hash.
 
-Images are jpeg, png, webp, gif, or svg, up to 8 MiB. Uploading the same filename replaces the object. Asset responses are cached for one hour. Removing an image from an option, or deleting a poll or option, leaves the stored object. Deleting a screening deletes its stored images.
+Images are jpeg, png, webp, gif, or svg, up to 8 MiB. Uploading the same filename replaces the object. Asset responses are cached for one hour. Removing an image from an option, or deleting a poll or option, leaves the stored object. Deleting an event deletes its stored images.
 
-`/admin` edits screenings, polls, options, the banner, and stills after Cloudflare Access signs the browser in. The screening editor is centered. Polls and options start collapsed. Their fields save as they change, and dragging one reorders it through the same order routes an agent calls. Each poll has its own start, stop, schedule, and a control to stop voting in a number of minutes. Each screening on that page links to its results, which total selections per option. That page refreshes about every 3 seconds and shows each poll's countdown. Its vote-code section generates codes and downloads them as a CSV that includes each code's URL, `https://vote.sandiego48.com/c/<code>`. Reset voting on that page deletes every code and every cast vote and leaves the polls, films, and images.
+`/admin` edits events, polls, options, the banner, and stills after Cloudflare Access signs the browser in. The event editor is centered, and Add poll sits in the center of that column. Polls and options start collapsed. Their fields save as they change, and dragging one reorders it through the same order routes an agent calls. Each poll opens and closes at its own times. Start voting sets the open time to now. Stop Voting sets the close time that many minutes ahead, and zero closes it now. Each event on that page links to its results, which total selections per option and offer the same start and stop controls. That page refreshes about every 3 seconds and shows each poll's countdown. Its vote-code section generates codes and downloads them as a CSV that includes each code's URL, `https://vote.sandiego48.com/c/<code>`. Reset voting on that page deletes every code and every cast vote and leaves the polls, films, and images.
 
 ## Admin access
 
