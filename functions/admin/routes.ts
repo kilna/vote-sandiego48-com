@@ -4,8 +4,8 @@ import { hashCode, randomCode } from "../codes";
 import type { Env } from "../types";
 import { error, json } from "../api/http";
 import { imageContentType, imageKey, keyBelongs, MAX_IMAGE_BYTES, safeFilename } from "./images";
-import { presentOption, presentPoll, presentScreening, presentScreeningSummary, type OptionRow, type PollRow, type ScreeningRow } from "./present";
-import { adminIndex, matchAdminRoute, optionOrder, optionPatch, optionWrite, pollOrder, pollPatch, pollWrite, screeningPatch, screeningWrite, validateObject, voteCodeGenerate } from "../api/schema";
+import { presentOption, presentPoll, presentEvent, presentEventSummary, type OptionRow, type PollRow, type EventRow } from "./present";
+import { adminIndex, matchAdminRoute, optionOrder, optionPatch, optionWrite, pollOrder, pollPatch, pollWrite, eventPatch, eventWrite, validateObject, voteCodeGenerate } from "../api/schema";
 import { votingMode, votingOpen } from "../voting";
 
 type Media = Env["MEDIA"] & {
@@ -24,12 +24,12 @@ export async function handleAdmin(request: Request, env: Env, parts: string[]) {
   const params = matched.params;
   switch (matched.operationId) {
     case "getAdminIndex": return json(adminIndex());
-    case "listScreenings": return listScreenings(env);
-    case "createScreening": return createScreening(request, env);
-    case "getScreening": return readScreening(env, params.slug);
-    case "updateScreening": return updateScreening(request, env, params.slug);
-    case "deleteScreening": return deleteScreening(env, params.slug);
-    case "getScreeningResults": return screeningResults(env, params.slug);
+    case "listEvents": return listEvents(env);
+    case "createEvent": return createEvent(request, env);
+    case "getEvent": return readEvent(env, params.slug);
+    case "updateEvent": return updateEvent(request, env, params.slug);
+    case "deleteEvent": return deleteEvent(env, params.slug);
+    case "getEventResults": return screeningResults(env, params.slug);
     case "listPolls": return listPolls(env, params.slug);
     case "createPoll": return createPoll(request, env, params.slug);
     case "getPoll": return readPoll(env, params.slug, params.pollSlug);
@@ -42,7 +42,7 @@ export async function handleAdmin(request: Request, env: Env, parts: string[]) {
     case "updateOption": return updateOption(request, env, params.slug, params.pollSlug, params.optionId);
     case "deleteOption": return deleteOption(env, params.slug, params.pollSlug, params.optionId);
     case "reorderOptions": return reorderOptions(request, env, params.slug, params.pollSlug);
-    case "uploadScreeningImage": return uploadImage(request, env, params.slug);
+    case "uploadEventImage": return uploadImage(request, env, params.slug);
     case "getVoteCodes": return listCodes(env, params.slug);
     case "generateVoteCodes": return generateCodes(request, env, params.slug);
     case "deleteVoteCodes": return deleteUnusedCodes(env, params.slug);
@@ -77,13 +77,13 @@ function isUnique(err: unknown) {
   return String(err).includes("UNIQUE");
 }
 
-async function requireScreening(env: Env, slug: string): Promise<{ row: ScreeningRow } | Failure> {
-  const row = await env.DB.prepare("SELECT * FROM screenings WHERE slug = ?").bind(slug).first<ScreeningRow>();
+async function requireEvent(env: Env, slug: string): Promise<{ row: EventRow } | Failure> {
+  const row = await env.DB.prepare("SELECT * FROM events WHERE slug = ?").bind(slug).first<EventRow>();
   return row ? { row } : { response: error(404, "Event not found.") };
 }
 
-async function requirePoll(env: Env, screeningId: string, pollSlug: string): Promise<{ row: PollRow } | Failure> {
-  const row = await env.DB.prepare("SELECT * FROM polls WHERE screening_id = ? AND slug = ?").bind(screeningId, pollSlug).first<PollRow>();
+async function requirePoll(env: Env, eventId: string, pollSlug: string): Promise<{ row: PollRow } | Failure> {
+  const row = await env.DB.prepare("SELECT * FROM polls WHERE event_id = ? AND slug = ?").bind(eventId, pollSlug).first<PollRow>();
   return row ? { row } : { response: error(404, "Poll not found.") };
 }
 
@@ -97,29 +97,29 @@ async function optionsFor(env: Env, pollId: string) {
   return result.results.map(presentOption);
 }
 
-async function pollsFor(env: Env, screening: ScreeningRow) {
-  const result = await env.DB.prepare("SELECT * FROM polls WHERE screening_id = ? ORDER BY sort_order, title").bind(screening.id).all<PollRow>();
+async function pollsFor(env: Env, screening: EventRow) {
+  const result = await env.DB.prepare("SELECT * FROM polls WHERE event_id = ? ORDER BY sort_order, title").bind(screening.id).all<PollRow>();
   const polls = [];
   for (const row of result.results) polls.push(presentPoll(screening.slug, row, await optionsFor(env, row.id)));
   return polls;
 }
 
 async function screeningResponse(env: Env, slug: string, status = 200, headers: Record<string, string> = {}) {
-  const found = await requireScreening(env, slug);
+  const found = await requireEvent(env, slug);
   if ("response" in found) return found.response;
-  return json(presentScreening(found.row, await pollsFor(env, found.row)), status, headers);
+  return json(presentEvent(found.row, await pollsFor(env, found.row)), status, headers);
 }
 
-async function pollResponse(env: Env, screening: ScreeningRow, poll: PollRow, status = 200, headers: Record<string, string> = {}) {
+async function pollResponse(env: Env, screening: EventRow, poll: PollRow, status = 200, headers: Record<string, string> = {}) {
   return json(presentPoll(screening.slug, poll, await optionsFor(env, poll.id)), status, headers);
 }
 
-async function assertKeys(env: Env, screeningId: string, keys: string[]) {
+async function assertKeys(env: Env, eventId: string, keys: string[]) {
   const seen = new Set<string>();
   for (const key of keys) {
     if (seen.has(key)) return `"${key}" is listed more than once.`;
     seen.add(key);
-    if (!keyBelongs(screeningId, key)) return `"${key}" is not an image of this event. Upload it with uploadScreeningImage and use the returned key.`;
+    if (!keyBelongs(eventId, key)) return `"${key}" is not an image of this event. Upload it with uploadEventImage and use the returned key.`;
     if (!await env.MEDIA.get(key)) return `"${key}" is not in storage. Upload it before attaching it.`;
   }
   return null;
@@ -130,37 +130,37 @@ async function nextSort(env: Env, sql: string, id: string) {
   return row?.next ?? 0;
 }
 
-async function listScreenings(env: Env) {
-  const result = await env.DB.prepare("SELECT * FROM screenings ORDER BY start_at, slug").all<ScreeningRow>();
-  return json({ screenings: result.results.map(presentScreeningSummary) });
+async function listEvents(env: Env) {
+  const result = await env.DB.prepare("SELECT * FROM events ORDER BY start_at, slug").all<EventRow>();
+  return json({ events: result.results.map(presentEventSummary) });
 }
 
-async function createScreening(request: Request, env: Env) {
+async function createEvent(request: Request, env: Env) {
   const body = await readBody(request);
   if ("response" in body) return body.response;
-  const parsed = validateObject(screeningWrite, body.value, "create");
+  const parsed = validateObject(eventWrite, body.value, "create");
   if (!parsed.ok) return invalid(parsed.fields);
   const value = parsed.value;
   const id = crypto.randomUUID();
   try {
-    await env.DB.prepare("INSERT INTO screenings (id, slug, title, venue, banner_image_key, timezone, start_at, stop_at, voting) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)").bind(id, value.slug, value.title, blankToNull(value.venue), value.timezone, value.startAt, value.stopAt, "scheduled").run();
+    await env.DB.prepare("INSERT INTO events (id, slug, title, venue, banner_image_key, timezone, start_at, stop_at, voting) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)").bind(id, value.slug, value.title, blankToNull(value.venue), value.timezone, value.startAt, value.stopAt, "scheduled").run();
   } catch (err) {
     if (isUnique(err)) return error(409, "An event with this slug already exists.", { field: "slug" });
     throw err;
   }
-  return screeningResponse(env, String(value.slug), 201, { Location: `/api/admin/screenings/${encodeURIComponent(String(value.slug))}` });
+  return screeningResponse(env, String(value.slug), 201, { Location: `/api/admin/events/${encodeURIComponent(String(value.slug))}` });
 }
 
-async function readScreening(env: Env, slug: string) {
+async function readEvent(env: Env, slug: string) {
   return screeningResponse(env, slug);
 }
 
-async function updateScreening(request: Request, env: Env, slug: string) {
-  const found = await requireScreening(env, slug);
+async function updateEvent(request: Request, env: Env, slug: string) {
+  const found = await requireEvent(env, slug);
   if ("response" in found) return found.response;
   const body = await readBody(request);
   if ("response" in body) return body.response;
-  const parsed = validateObject(screeningPatch, body.value, "patch");
+  const parsed = validateObject(eventPatch, body.value, "patch");
   if (!parsed.ok) return invalid(parsed.fields);
   const value = parsed.value;
   const startAt = typeof value.startAt === "string" ? value.startAt : found.row.start_at;
@@ -174,7 +174,7 @@ async function updateScreening(request: Request, env: Env, slug: string) {
   const keys = Object.keys(value).filter((key) => columns[key]);
   const stored = keys.map((key) => key === "venue" ? blankToNull(value[key]) : value[key]);
   try {
-    await env.DB.prepare(`UPDATE screenings SET ${keys.map((key) => `${columns[key]} = ?`).join(", ")} WHERE id = ?`).bind(...stored, found.row.id).run();
+    await env.DB.prepare(`UPDATE events SET ${keys.map((key) => `${columns[key]} = ?`).join(", ")} WHERE id = ?`).bind(...stored, found.row.id).run();
   } catch (err) {
     if (isUnique(err)) return error(409, "An event with this slug already exists.", { field: "slug" });
     throw err;
@@ -183,16 +183,16 @@ async function updateScreening(request: Request, env: Env, slug: string) {
   return screeningResponse(env, nextSlug);
 }
 
-async function deleteScreening(env: Env, slug: string) {
-  const found = await requireScreening(env, slug);
+async function deleteEvent(env: Env, slug: string) {
+  const found = await requireEvent(env, slug);
   if ("response" in found) return found.response;
   const id = found.row.id;
   await env.DB.batch([
-    env.DB.prepare("DELETE FROM votes WHERE screening_id = ?").bind(id),
-    env.DB.prepare("DELETE FROM options WHERE poll_id IN (SELECT id FROM polls WHERE screening_id = ?)").bind(id),
-    env.DB.prepare("DELETE FROM polls WHERE screening_id = ?").bind(id),
-    env.DB.prepare("DELETE FROM vote_codes WHERE screening_id = ?").bind(id),
-    env.DB.prepare("DELETE FROM screenings WHERE id = ?").bind(id),
+    env.DB.prepare("DELETE FROM votes WHERE event_id = ?").bind(id),
+    env.DB.prepare("DELETE FROM options WHERE poll_id IN (SELECT id FROM polls WHERE event_id = ?)").bind(id),
+    env.DB.prepare("DELETE FROM polls WHERE event_id = ?").bind(id),
+    env.DB.prepare("DELETE FROM vote_codes WHERE event_id = ?").bind(id),
+    env.DB.prepare("DELETE FROM events WHERE id = ?").bind(id),
   ]);
   try {
     await removeImages(env, id);
@@ -202,12 +202,12 @@ async function deleteScreening(env: Env, slug: string) {
   return json({ deleted: true, slug });
 }
 
-async function removeImages(env: Env, screeningId: string) {
+async function removeImages(env: Env, eventId: string) {
   const media = env.MEDIA as Media;
   const keys: string[] = [];
   let cursor: string | undefined;
   do {
-    const page = await media.list({ prefix: `${screeningId}/`, cursor });
+    const page = await media.list({ prefix: `${eventId}/`, cursor });
     keys.push(...page.objects.map((object) => object.key));
     cursor = page.truncated ? page.cursor : undefined;
   } while (cursor);
@@ -215,38 +215,38 @@ async function removeImages(env: Env, screeningId: string) {
 }
 
 async function listPolls(env: Env, slug: string) {
-  const found = await requireScreening(env, slug);
+  const found = await requireEvent(env, slug);
   if ("response" in found) return found.response;
   return json({ polls: await pollsFor(env, found.row) });
 }
 
 async function createPoll(request: Request, env: Env, slug: string) {
-  const found = await requireScreening(env, slug);
+  const found = await requireEvent(env, slug);
   if ("response" in found) return found.response;
   const body = await readBody(request);
   if ("response" in body) return body.response;
   const parsed = validateObject(pollWrite, body.value, "create");
   if (!parsed.ok) return invalid(parsed.fields);
   const value = parsed.value;
-  const sortOrder = typeof value.sortOrder === "number" ? value.sortOrder : await nextSort(env, "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM polls WHERE screening_id = ?", found.row.id);
+  const sortOrder = typeof value.sortOrder === "number" ? value.sortOrder : await nextSort(env, "SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM polls WHERE event_id = ?", found.row.id);
   const startAt = typeof value.startAt === "string" ? value.startAt : found.row.start_at;
   const stopAt = typeof value.stopAt === "string" ? value.stopAt : found.row.stop_at;
   if (Date.parse(stopAt) <= Date.parse(startAt)) return invalid({ stopAt: "Must be after startAt." });
   const voting = "scheduled";
   const id = crypto.randomUUID();
   try {
-    await env.DB.prepare("INSERT INTO polls (id, screening_id, slug, title, instructions, min_selections, max_selections, image_config, sort_order, voting, start_at, stop_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(id, found.row.id, value.slug, value.title, blankToNull(value.instructions), value.minSelections, value.maxSelections, JSON.stringify(value.imageConfig), sortOrder, voting, startAt, stopAt).run();
+    await env.DB.prepare("INSERT INTO polls (id, event_id, slug, title, instructions, min_selections, max_selections, image_config, sort_order, voting, start_at, stop_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(id, found.row.id, value.slug, value.title, blankToNull(value.instructions), value.minSelections, value.maxSelections, JSON.stringify(value.imageConfig), sortOrder, voting, startAt, stopAt).run();
   } catch (err) {
     if (isUnique(err)) return error(409, "A poll with this slug already exists on the event.", { field: "slug" });
     throw err;
   }
   const poll = await requirePoll(env, found.row.id, String(value.slug));
   if ("response" in poll) return poll.response;
-  return pollResponse(env, found.row, poll.row, 201, { Location: `/api/admin/screenings/${encodeURIComponent(slug)}/polls/${encodeURIComponent(String(value.slug))}` });
+  return pollResponse(env, found.row, poll.row, 201, { Location: `/api/admin/events/${encodeURIComponent(slug)}/polls/${encodeURIComponent(String(value.slug))}` });
 }
 
 async function readPoll(env: Env, slug: string, pollSlug: string) {
-  const found = await requireScreening(env, slug);
+  const found = await requireEvent(env, slug);
   if ("response" in found) return found.response;
   const poll = await requirePoll(env, found.row.id, pollSlug);
   if ("response" in poll) return poll.response;
@@ -254,7 +254,7 @@ async function readPoll(env: Env, slug: string, pollSlug: string) {
 }
 
 async function updatePoll(request: Request, env: Env, slug: string, pollSlug: string) {
-  const found = await requireScreening(env, slug);
+  const found = await requireEvent(env, slug);
   if ("response" in found) return found.response;
   const poll = await requirePoll(env, found.row.id, pollSlug);
   if ("response" in poll) return poll.response;
@@ -288,14 +288,14 @@ async function updatePoll(request: Request, env: Env, slug: string, pollSlug: st
 }
 
 async function reorderPolls(request: Request, env: Env, slug: string) {
-  const found = await requireScreening(env, slug);
+  const found = await requireEvent(env, slug);
   if ("response" in found) return found.response;
   const body = await readBody(request);
   if ("response" in body) return body.response;
   const parsed = validateObject(pollOrder, body.value, "create");
   if (!parsed.ok) return invalid(parsed.fields);
   const slugs = parsed.value.slugs as string[];
-  const rows = await env.DB.prepare("SELECT id, slug FROM polls WHERE screening_id = ?").bind(found.row.id).all<{ id: string; slug: string }>();
+  const rows = await env.DB.prepare("SELECT id, slug FROM polls WHERE event_id = ?").bind(found.row.id).all<{ id: string; slug: string }>();
   const ids = new Map(rows.results.map((row) => [row.slug, row.id]));
   const mismatch = completeOrder(slugs, ids, "slugs", "List every poll on this event exactly once.", (item) => `"${item}" is not a poll on this event.`);
   if (mismatch) return invalid(mismatch);
@@ -305,7 +305,7 @@ async function reorderPolls(request: Request, env: Env, slug: string) {
 }
 
 async function deletePoll(env: Env, slug: string, pollSlug: string) {
-  const found = await requireScreening(env, slug);
+  const found = await requireEvent(env, slug);
   if ("response" in found) return found.response;
   const poll = await requirePoll(env, found.row.id, pollSlug);
   if ("response" in poll) return poll.response;
@@ -318,7 +318,7 @@ async function deletePoll(env: Env, slug: string, pollSlug: string) {
 }
 
 async function listOptions(env: Env, slug: string, pollSlug: string) {
-  const found = await requireScreening(env, slug);
+  const found = await requireEvent(env, slug);
   if ("response" in found) return found.response;
   const poll = await requirePoll(env, found.row.id, pollSlug);
   if ("response" in poll) return poll.response;
@@ -326,7 +326,7 @@ async function listOptions(env: Env, slug: string, pollSlug: string) {
 }
 
 async function createOption(request: Request, env: Env, slug: string, pollSlug: string) {
-  const found = await requireScreening(env, slug);
+  const found = await requireEvent(env, slug);
   if ("response" in found) return found.response;
   const poll = await requirePoll(env, found.row.id, pollSlug);
   if ("response" in poll) return poll.response;
@@ -343,7 +343,7 @@ async function createOption(request: Request, env: Env, slug: string, pollSlug: 
   await env.DB.prepare("INSERT INTO options (id, poll_id, title, description, image_keys, sort_order) VALUES (?, ?, ?, ?, ?, ?)").bind(id, poll.row.id, value.title, blankToNull(value.description), JSON.stringify(keys), sortOrder).run();
   const option = await requireOption(env, poll.row.id, id);
   if ("response" in option) return option.response;
-  return json(presentOption(option.row), 201, { Location: `/api/admin/screenings/${encodeURIComponent(slug)}/polls/${encodeURIComponent(pollSlug)}/options/${encodeURIComponent(id)}` });
+  return json(presentOption(option.row), 201, { Location: `/api/admin/events/${encodeURIComponent(slug)}/polls/${encodeURIComponent(pollSlug)}/options/${encodeURIComponent(id)}` });
 }
 
 async function readOption(env: Env, slug: string, pollSlug: string, optionId: string) {
@@ -378,7 +378,7 @@ async function updateOption(request: Request, env: Env, slug: string, pollSlug: 
 }
 
 async function reorderOptions(request: Request, env: Env, slug: string, pollSlug: string) {
-  const found = await requireScreening(env, slug);
+  const found = await requireEvent(env, slug);
   if ("response" in found) return found.response;
   const poll = await requirePoll(env, found.row.id, pollSlug);
   if ("response" in poll) return poll.response;
@@ -412,8 +412,8 @@ async function deleteOption(env: Env, slug: string, pollSlug: string, optionId: 
   return json({ deleted: true, id: optionId });
 }
 
-async function locateOption(env: Env, slug: string, pollSlug: string, optionId: string): Promise<Failure | { screening: ScreeningRow; poll: PollRow; option: OptionRow }> {
-  const found = await requireScreening(env, slug);
+async function locateOption(env: Env, slug: string, pollSlug: string, optionId: string): Promise<Failure | { screening: EventRow; poll: PollRow; option: OptionRow }> {
+  const found = await requireEvent(env, slug);
   if ("response" in found) return found;
   const poll = await requirePoll(env, found.row.id, pollSlug);
   if ("response" in poll) return poll;
@@ -423,7 +423,7 @@ async function locateOption(env: Env, slug: string, pollSlug: string, optionId: 
 }
 
 async function uploadImage(request: Request, env: Env, slug: string) {
-  const found = await requireScreening(env, slug);
+  const found = await requireEvent(env, slug);
   if ("response" in found) return found.response;
   const contentType = imageContentType(request.headers.get("content-type"));
   if (!contentType) return error(415, "Send an image Content-Type: image/jpeg, image/png, image/webp, image/gif, or image/svg+xml.");
@@ -436,18 +436,18 @@ async function uploadImage(request: Request, env: Env, slug: string) {
   if (bytes.byteLength > MAX_IMAGE_BYTES) return error(413, "Images must be 8 MiB or smaller.");
   const key = imageKey(found.row.id, filename);
   await env.MEDIA.put(key, bytes, { httpMetadata: { contentType } });
-  const summary = presentScreeningSummary(found.row);
-  return json({ key, contentType, url: assetUrl(key), links: { screening: summary.links.self } }, 201);
+  const summary = presentEventSummary(found.row);
+  return json({ key, contentType, url: assetUrl(key), links: { event: summary.links.self } }, 201);
 }
 
 async function screeningResults(env: Env, slug: string) {
-  const found = await requireScreening(env, slug);
+  const found = await requireEvent(env, slug);
   if ("response" in found) return found.response;
   const counted = `WITH counted AS (
       SELECT v.poll_id, v.code_hash
       FROM votes v
       JOIN polls p ON p.id = v.poll_id
-      WHERE p.screening_id = ?
+      WHERE p.event_id = ?
       GROUP BY v.poll_id, v.code_hash
       HAVING COUNT(*) BETWEEN MIN(p.min_selections) AND MAX(p.max_selections)
     )`;
@@ -460,7 +460,7 @@ async function screeningResults(env: Env, slug: string) {
     LEFT JOIN options o ON o.poll_id = p.id
     LEFT JOIN votes v ON v.option_id = o.id
     LEFT JOIN counted c ON c.poll_id = v.poll_id AND c.code_hash = v.code_hash
-    WHERE p.screening_id = ?
+    WHERE p.event_id = ?
     GROUP BY p.id, p.slug, p.title, p.voting, p.start_at, p.stop_at, p.sort_order, o.id, o.title, o.sort_order
     ORDER BY p.sort_order, p.title, COUNT(c.code_hash) DESC, o.sort_order, o.title`).bind(found.row.id, found.row.id).all<ResultRow>();
   const polls: { id: string; slug: string; title: string; votes: number; voting: "scheduled" | "open" | "closed"; votingOpen: boolean; startAt: string; stopAt: string; options: { id: string; title: string; votes: number }[] }[] = [];
@@ -493,13 +493,13 @@ async function screeningResults(env: Env, slug: string) {
 type ResultRow = { poll_id: string; poll_slug: string; poll_title: string; voting: string | null; start_at: string | null; stop_at: string | null; option_id: string | null; option_title: string | null; votes: number };
 
 async function listCodes(env: Env, slug: string) {
-  const found = await requireScreening(env, slug);
+  const found = await requireEvent(env, slug);
   if ("response" in found) return found.response;
   return json(await codeList(env, found.row.id));
 }
 
 async function generateCodes(request: Request, env: Env, slug: string) {
-  const found = await requireScreening(env, slug);
+  const found = await requireEvent(env, slug);
   if ("response" in found) return found.response;
   const body = await readBody(request);
   if ("response" in body) return body.response;
@@ -522,7 +522,7 @@ async function generateCodes(request: Request, env: Env, slug: string) {
     for (const item of batch) if (!taken.has(item.hash)) pending.push(item);
   }
   try {
-    await env.DB.batch(pending.map((item) => env.DB.prepare("INSERT INTO vote_codes (code_hash, screening_id, code) VALUES (?, ?, ?)").bind(item.hash, found.row.id, item.code)));
+    await env.DB.batch(pending.map((item) => env.DB.prepare("INSERT INTO vote_codes (code_hash, event_id, code) VALUES (?, ?, ?)").bind(item.hash, found.row.id, item.code)));
   } catch (err) {
     if (isUnique(err)) return error(409, "A generated code collided with an existing code. Try again.");
     throw err;
@@ -532,32 +532,32 @@ async function generateCodes(request: Request, env: Env, slug: string) {
 }
 
 async function resetVoting(env: Env, slug: string) {
-  const found = await requireScreening(env, slug);
+  const found = await requireEvent(env, slug);
   if ("response" in found) return found.response;
   const id = found.row.id;
-  const votes = await env.DB.prepare("SELECT COUNT(*) AS total FROM votes WHERE screening_id = ?").bind(id).first<{ total: number }>();
-  const codes = await env.DB.prepare("SELECT COUNT(*) AS total FROM vote_codes WHERE screening_id = ?").bind(id).first<{ total: number }>();
+  const votes = await env.DB.prepare("SELECT COUNT(*) AS total FROM votes WHERE event_id = ?").bind(id).first<{ total: number }>();
+  const codes = await env.DB.prepare("SELECT COUNT(*) AS total FROM vote_codes WHERE event_id = ?").bind(id).first<{ total: number }>();
   await env.DB.batch([
-    env.DB.prepare("DELETE FROM votes WHERE screening_id = ?").bind(id),
-    env.DB.prepare("DELETE FROM vote_codes WHERE screening_id = ?").bind(id),
+    env.DB.prepare("DELETE FROM votes WHERE event_id = ?").bind(id),
+    env.DB.prepare("DELETE FROM vote_codes WHERE event_id = ?").bind(id),
   ]);
   return json({ votes: Number(votes?.total || 0), codes: Number(codes?.total || 0) });
 }
 
 async function deleteUnusedCodes(env: Env, slug: string) {
-  const found = await requireScreening(env, slug);
+  const found = await requireEvent(env, slug);
   if ("response" in found) return found.response;
   const summary = await codeList(env, found.row.id);
-  const removed = await env.DB.prepare("DELETE FROM vote_codes WHERE screening_id = ? AND used_at IS NULL").bind(found.row.id).run() as { meta?: { changes?: number } };
+  const removed = await env.DB.prepare("DELETE FROM vote_codes WHERE event_id = ? AND used_at IS NULL").bind(found.row.id).run() as { meta?: { changes?: number } };
   return json({ deleted: Number(removed.meta?.changes ?? summary.unused), used: summary.used });
 }
 
-async function codeList(env: Env, screeningId: string) {
-  const row = await env.DB.prepare("SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN used_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS used, COALESCE(SUM(CASE WHEN code IS NULL OR code = '' THEN 1 ELSE 0 END), 0) AS unlisted FROM vote_codes WHERE screening_id = ?").bind(screeningId).first<{ total: number; used: number; unlisted: number }>();
+async function codeList(env: Env, eventId: string) {
+  const row = await env.DB.prepare("SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN used_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS used, COALESCE(SUM(CASE WHEN code IS NULL OR code = '' THEN 1 ELSE 0 END), 0) AS unlisted FROM vote_codes WHERE event_id = ?").bind(eventId).first<{ total: number; used: number; unlisted: number }>();
   const total = Number(row?.total || 0);
   const used = Number(row?.used || 0);
   const unlisted = Number(row?.unlisted || 0);
-  const listed = await env.DB.prepare("SELECT code, used_at FROM vote_codes WHERE screening_id = ? AND code IS NOT NULL AND code != '' ORDER BY code").bind(screeningId).all<{ code: string; used_at: string | null }>();
+  const listed = await env.DB.prepare("SELECT code, used_at FROM vote_codes WHERE event_id = ? AND code IS NOT NULL AND code != '' ORDER BY code").bind(eventId).all<{ code: string; used_at: string | null }>();
   return {
     total,
     used,

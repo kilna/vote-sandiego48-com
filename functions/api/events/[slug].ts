@@ -1,13 +1,13 @@
 import { parseImageConfig } from "../../admin/present";
 import { assetUrl } from "../../assets";
-import type { Env, Screening } from "../../types";
+import type { Env, Event } from "../../types";
 import { votingMode, votingOpen } from "../../voting";
 export const onRequestGet: PagesFunction<Env> = async ({ env, params }) => {
   const slug = String(params.slug || "");
-  const screening = await env.DB.prepare("SELECT * FROM screenings WHERE slug = ?").bind(slug).first<any>();
+  const screening = await env.DB.prepare("SELECT * FROM events WHERE slug = ?").bind(slug).first<any>();
   if (!screening) return Response.json({ error: "Event not found" }, { status: 404 });
-  const polls = await env.DB.prepare("SELECT * FROM polls WHERE screening_id = ? ORDER BY sort_order, title").bind(screening.id).all<any>();
-  const result: Screening = { id: screening.id, slug: screening.slug, title: screening.title, venue: screening.venue || undefined, bannerImage: screening.banner_image_key ? assetUrl(screening.banner_image_key) : undefined, timezone: screening.timezone, startAt: screening.start_at, stopAt: screening.stop_at, polls: [] };
+  const polls = await env.DB.prepare("SELECT * FROM polls WHERE event_id = ? ORDER BY sort_order, title").bind(screening.id).all<any>();
+  const result: Event = { id: screening.id, slug: screening.slug, title: screening.title, venue: screening.venue || undefined, bannerImage: screening.banner_image_key ? assetUrl(screening.banner_image_key) : undefined, timezone: screening.timezone, startAt: screening.start_at, stopAt: screening.stop_at, polls: [] };
   for (const p of polls.results) {
     const options = await env.DB.prepare("SELECT * FROM options WHERE poll_id = ? ORDER BY sort_order, title").bind(p.id).all<any>();
     result.polls.push({

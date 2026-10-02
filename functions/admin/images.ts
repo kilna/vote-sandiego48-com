@@ -9,12 +9,12 @@ export function safeFilename(name: string) {
   return FILENAME.test(base) ? base : null;
 }
 
-export function imageKey(screeningId: string, filename: string) {
-  return `${screeningId}/${filename}`;
+export function imageKey(eventId: string, filename: string) {
+  return `${eventId}/${filename}`;
 }
 
-export function keyBelongs(screeningId: string, key: string) {
-  const prefix = `${screeningId}/`;
+export function keyBelongs(eventId: string, key: string) {
+  const prefix = `${eventId}/`;
   if (!key.startsWith(prefix)) return false;
   return FILENAME.test(key.slice(prefix.length));
 }

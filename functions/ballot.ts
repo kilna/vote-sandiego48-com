@@ -13,14 +13,14 @@ export type BallotState = {
   now: string;
   slug: string;
   title: string;
-  screeningId: string;
+  eventId: string;
   used: boolean;
   polls: BallotPollState[];
   selections: Record<string, string[]>;
 };
 
 type BallotRow = {
-  screening_id: string;
+  event_id: string;
   slug: string;
   title: string;
   used_at: string | null;
@@ -31,11 +31,11 @@ type BallotRow = {
   option_id: string | null;
 };
 
-const ballotSql = `SELECT s.id AS screening_id, s.slug AS slug, s.title AS title, c.used_at AS used_at,
+const ballotSql = `SELECT s.id AS event_id, s.slug AS slug, s.title AS title, c.used_at AS used_at,
   p.id AS poll_id, p.voting AS voting, p.start_at AS start_at, p.stop_at AS stop_at, v.option_id AS option_id
   FROM vote_codes c
-  JOIN screenings s ON s.id = c.screening_id
-  LEFT JOIN polls p ON p.screening_id = s.id
+  JOIN events s ON s.id = c.event_id
+  LEFT JOIN polls p ON p.event_id = s.id
   LEFT JOIN votes v ON v.poll_id = p.id AND v.code_hash = c.code_hash
   WHERE c.code_hash = ?
   ORDER BY p.sort_order, p.title, v.option_id`;
@@ -69,7 +69,7 @@ export function foldBallot(rows: BallotRow[], now = Date.now()): BallotState | n
     now: new Date(now).toISOString(),
     slug: first.slug,
     title: first.title,
-    screeningId: first.screening_id,
+    eventId: first.event_id,
     used: first.used_at !== null,
     polls,
     selections,

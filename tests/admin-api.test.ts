@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { keyBelongs, safeFilename } from "../functions/admin/images";
-import { imageCycleSeconds, parseImageConfig, presentOption, presentPoll, presentScreening } from "../functions/admin/present";
+import { imageCycleSeconds, parseImageConfig, presentOption, presentPoll, presentEvent } from "../functions/admin/present";
 import { normalizeCode, randomCode } from "../functions/codes";
-import { adminIndex, adminPath, adminRoutes, examples, matchAdminRoute, openapiDocument, optionOrder, optionWrite, pollOrder, pollPatch, pollWrite, publicIndex, screeningPatch, screeningWrite, validateObject, voteCodeGenerate } from "../functions/api/schema";
+import { adminIndex, adminPath, adminRoutes, examples, matchAdminRoute, openapiDocument, optionOrder, optionWrite, pollOrder, pollPatch, pollWrite, publicIndex, eventPatch, eventWrite, validateObject, voteCodeGenerate } from "../functions/api/schema";
 import { countdownLabel, nextVotingCue, startNow, stopInMinutes, stopNow, votingOpen } from "../functions/voting";
 
 describe("admin api contract", () => {
@@ -18,11 +18,11 @@ describe("admin api contract", () => {
     expect(publicIndex().links.openapi.href).toBe("/api/openapi.json");
     const ids = new Set(adminRoutes.map((route) => route.operationId));
     const index = adminIndex();
-    for (const step of [...index.workflows.createScreening, ...index.workflows.reorder]) expect(ids.has(step.operationId)).toBe(true);
+    for (const step of [...index.workflows.createEvent, ...index.workflows.reorder]) expect(ids.has(step.operationId)).toBe(true);
   });
 
   it("accepts the documented create examples", () => {
-    expect(validateObject(screeningWrite, examples.screeningCreate, "create").ok).toBe(true);
+    expect(validateObject(eventWrite, examples.eventCreate, "create").ok).toBe(true);
     expect(validateObject(pollWrite, examples.pollCreate, "create").ok).toBe(true);
     expect(validateObject(optionWrite, examples.optionCreate, "create").ok).toBe(true);
     expect(validateObject(voteCodeGenerate, examples.codes, "create").ok).toBe(true);
@@ -31,17 +31,17 @@ describe("admin api contract", () => {
   });
 
   it("names invalid fields", () => {
-    const missing = validateObject(screeningWrite, { slug: "spring-screening" }, "create");
+    const missing = validateObject(eventWrite, { slug: "spring-screening" }, "create");
     expect(missing.ok).toBe(false);
     if (!missing.ok) expect(missing.fields.title).toBe("Required.");
-    const slug = validateObject(screeningWrite, { ...examples.screeningCreate, slug: "Spring Screening" }, "create");
+    const slug = validateObject(eventWrite, { ...examples.eventCreate, slug: "Spring Event" }, "create");
     expect(slug.ok).toBe(false);
-    const order = validateObject(screeningWrite, { ...examples.screeningCreate, stopAt: "2026-05-01T12:00:00-07:00" }, "create");
+    const order = validateObject(eventWrite, { ...examples.eventCreate, stopAt: "2026-05-01T12:00:00-07:00" }, "create");
     expect(order.ok).toBe(false);
     if (!order.ok) expect(order.fields.stopAt).toMatch(/after/);
-    const unknown = validateObject(screeningPatch, { title: "Evening", extra: true }, "patch");
+    const unknown = validateObject(eventPatch, { title: "Evening", extra: true }, "patch");
     expect(unknown.ok).toBe(false);
-    const empty = validateObject(screeningPatch, {}, "patch");
+    const empty = validateObject(eventPatch, {}, "patch");
     expect(empty.ok).toBe(false);
     const selections = validateObject(pollPatch, { minSelections: 3, maxSelections: 1 }, "patch");
     expect(selections.ok).toBe(false);
@@ -61,7 +61,7 @@ describe("admin api contract", () => {
     const voting = validateObject(pollPatch, { voting: "open" }, "patch");
     expect(voting.ok).toBe(false);
     if (!voting.ok) expect(voting.fields.voting).toBe("Unknown field.");
-    expect(validateObject(screeningPatch, { voting: "open" }, "patch").ok).toBe(false);
+    expect(validateObject(eventPatch, { voting: "open" }, "patch").ok).toBe(false);
     expect(validateObject(pollWrite, examples.pollCreate, "create").ok).toBe(true);
     const windowOrder = validateObject(pollWrite, { ...examples.pollCreate, startAt: "2026-05-01T23:00:00Z", stopAt: "2026-05-01T18:00:00Z" }, "create");
     expect(windowOrder.ok).toBe(false);
@@ -76,17 +76,17 @@ describe("admin api contract", () => {
   });
 
   it("matches admin routes and rejects unknown methods", () => {
-    const created = matchAdminRoute("POST", ["screenings"]);
-    expect(created.ok && created.operationId).toBe("createScreening");
-    const wrong = matchAdminRoute("PUT", ["screenings"]);
+    const created = matchAdminRoute("POST", ["events"]);
+    expect(created.ok && created.operationId).toBe("createEvent");
+    const wrong = matchAdminRoute("PUT", ["events"]);
     expect(wrong.ok).toBe(false);
     if (!wrong.ok) expect(wrong.status).toBe(405);
     expect(matchAdminRoute("GET", ["missing"]).ok).toBe(false);
-    const reorderPolls = matchAdminRoute("PUT", ["screenings", "spring", "polls", "order"]);
+    const reorderPolls = matchAdminRoute("PUT", ["events", "spring", "polls", "order"]);
     expect(reorderPolls.ok && reorderPolls.operationId).toBe("reorderPolls");
-    const namedPoll = matchAdminRoute("PATCH", ["screenings", "spring", "polls", "order"]);
+    const namedPoll = matchAdminRoute("PATCH", ["events", "spring", "polls", "order"]);
     expect(namedPoll.ok && namedPoll.operationId).toBe("updatePoll");
-    const reorderOptions = matchAdminRoute("PUT", ["screenings", "spring", "polls", "best-film", "options", "order"]);
+    const reorderOptions = matchAdminRoute("PUT", ["events", "spring", "polls", "best-film", "options", "order"]);
     expect(reorderOptions.ok && reorderOptions.operationId).toBe("reorderOptions");
   });
 
@@ -100,7 +100,7 @@ describe("admin api contract", () => {
   });
 
   it("keeps presenter fields in the OpenAPI schemas", () => {
-    const screening = presentScreening({
+    const screening = presentEvent({
       id: "id",
       slug: "spring-screening",
       title: "Spring",
@@ -111,7 +111,7 @@ describe("admin api contract", () => {
       stop_at: "2026-05-01T23:00:00-07:00",
     }, [presentPoll("spring-screening", {
       id: "poll",
-      screening_id: "id",
+      event_id: "id",
       slug: "best-film",
       title: "Best Film",
       instructions: null,
@@ -120,8 +120,8 @@ describe("admin api contract", () => {
       image_config: "{}",
       sort_order: 0,
     }, [presentOption({ id: "opt", poll_id: "poll", title: "Orange Hour", description: null, image_keys: "[]", sort_order: 0 })])]);
-    const schemas = openapiDocument().components.schemas as { Screening: { properties: Record<string, unknown> }; Poll: { properties: Record<string, unknown> }; Option: { properties: Record<string, unknown> } };
-    for (const key of Object.keys(screening)) expect(schemas.Screening.properties).toHaveProperty(key);
+    const schemas = openapiDocument().components.schemas as { Event: { properties: Record<string, unknown> }; Poll: { properties: Record<string, unknown> }; Option: { properties: Record<string, unknown> } };
+    for (const key of Object.keys(screening)) expect(schemas.Event.properties).toHaveProperty(key);
     for (const key of Object.keys(screening.polls[0])) expect(schemas.Poll.properties).toHaveProperty(key);
     for (const key of Object.keys(screening.polls[0].options[0])) expect(schemas.Option.properties).toHaveProperty(key);
   });

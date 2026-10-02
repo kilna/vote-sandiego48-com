@@ -1,7 +1,7 @@
 import { assetUrl } from "../assets";
 import { votingMode, votingOpen } from "../voting";
 
-export type ScreeningRow = {
+export type EventRow = {
   id: string;
   slug: string;
   title: string;
@@ -15,7 +15,7 @@ export type ScreeningRow = {
 
 export type PollRow = {
   id: string;
-  screening_id: string;
+  event_id: string;
   slug: string;
   title: string;
   instructions: string | null;
@@ -101,13 +101,13 @@ export function presentPoll(screeningSlug: string, row: PollRow, options: Return
     votingOpen: Boolean(startAt && stopAt && votingOpen(startAt, stopAt)),
     options,
     links: {
-      self: `/api/admin/screenings/${slug}/polls/${pollSlug}`,
-      options: `/api/admin/screenings/${slug}/polls/${pollSlug}/options`,
+      self: `/api/admin/events/${slug}/polls/${pollSlug}`,
+      options: `/api/admin/events/${slug}/polls/${pollSlug}/options`,
     },
   };
 }
 
-export function presentScreeningSummary(row: ScreeningRow) {
+export function presentEventSummary(row: EventRow) {
   const slug = encodeURIComponent(row.slug);
   return {
     id: row.id,
@@ -120,16 +120,16 @@ export function presentScreeningSummary(row: ScreeningRow) {
     bannerImageKey: row.banner_image_key,
     bannerImage: row.banner_image_key ? assetUrl(row.banner_image_key) : null,
     links: {
-      self: `/api/admin/screenings/${slug}`,
-      polls: `/api/admin/screenings/${slug}/polls`,
-      images: `/api/admin/screenings/${slug}/images`,
-      codes: `/api/admin/screenings/${slug}/codes`,
-      public: `/api/screenings/${slug}`,
+      self: `/api/admin/events/${slug}`,
+      polls: `/api/admin/events/${slug}/polls`,
+      images: `/api/admin/events/${slug}/images`,
+      codes: `/api/admin/events/${slug}/codes`,
+      public: `/api/events/${slug}`,
       ballot: `/s/${slug}`,
     },
   };
 }
 
-export function presentScreening(row: ScreeningRow, polls: ReturnType<typeof presentPoll>[]) {
-  return { ...presentScreeningSummary(row), polls };
+export function presentEvent(row: EventRow, polls: ReturnType<typeof presentPoll>[]) {
+  return { ...presentEventSummary(row), polls };
 }

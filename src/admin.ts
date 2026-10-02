@@ -6,7 +6,7 @@ type ImageConfig = { aspectRatio: string; cycle?: number; zoomable?: boolean };
 type Option = { id: string; title: string; description: string | null; imageKeys: string[]; images: string[]; sortOrder: number };
 type Voting = "scheduled" | "open" | "closed";
 type Poll = { id: string; slug: string; title: string; instructions: string | null; minSelections: number; maxSelections: number; imageConfig: ImageConfig; sortOrder: number; startAt: string; stopAt: string; voting: Voting; votingOpen: boolean; options: Option[] };
-type Screening = {
+type Event = {
   id: string;
   slug: string;
   title: string;
@@ -19,12 +19,12 @@ type Screening = {
   polls: Poll[];
   links: { ballot: string };
 };
-type Summary = Omit<Screening, "polls" | "links"> & { links: { ballot: string } };
+type Summary = Omit<Event, "polls" | "links"> & { links: { ballot: string } };
 type VoteCode = { code: string; used: boolean };
 type CodeList = { total: number; used: number; unused: number; unlisted: number; codes: VoteCode[] };
 type ResultOption = { id: string; title: string; votes: number };
 type ResultPoll = { id: string; slug: string; title: string; votes: number; voting: Voting; votingOpen: boolean; startAt: string; stopAt: string; options: ResultOption[] };
-type ScreeningResults = { now: string; slug: string; title: string; ballots: number; polls: ResultPoll[] };
+type EventResults = { now: string; slug: string; title: string; ballots: number; polls: ResultPoll[] };
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 const noticeKey = "sd48-admin-notice";
@@ -35,7 +35,7 @@ let generation = 0;
 let resultsTimer = 0;
 let resultsWatch = 0;
 let resultsSkew = 0;
-let latestResults: ScreeningResults | null = null;
+let latestResults: EventResults | null = null;
 const resultClocks = new Map<string, () => void>();
 const resultClockKeys = new Map<string, string>();
 const resultsEveryMs = 3000;
@@ -123,10 +123,10 @@ async function render() {
   const path = location.pathname.replace(/\/$/, "") || "/admin";
   try {
     if (path === "/admin") await listScreen(gen);
-    else if (path === "/admin/screenings/new") newScreen();
+    else if (path === "/admin/events/new") newScreen();
     else {
-      const results = path.match(/^\/admin\/screenings\/([^/]+)\/results$/);
-      const edit = path.match(/^\/admin\/screenings\/([^/]+)$/);
+      const results = path.match(/^\/admin\/events\/([^/]+)\/results$/);
+      const edit = path.match(/^\/admin\/events\/([^/]+)$/);
       if (results) await resultsScreen(gen, decodeURIComponent(results[1]));
       else if (edit) await editScreen(gen, decodeURIComponent(edit[1]));
       else missing();
@@ -177,25 +177,25 @@ async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 async function listScreen(gen: number) {
   paint(shell("Events", "<p>Loading…</p>"));
-  const data = await api<{ screenings: Summary[] }>("/api/admin/screenings");
+  const data = await api<{ events: Summary[] }>("/api/admin/events");
   if (gen !== generation) return;
-  const items = data.screenings.length ? data.screenings.map(summaryCard).join("") : "<p>No events yet.</p>";
-  paint(shell("Events", `<p><a class="button primary" href="/admin/screenings/new">New event</a></p><div class="stack">${items}</div>`));
+  const items = data.events.length ? data.events.map(summaryCard).join("") : "<p>No events yet.</p>";
+  paint(shell("Events", `<p><a class="button primary" href="/admin/events/new">New event</a></p><div class="stack">${items}</div>`));
   document.querySelectorAll<HTMLButtonElement>("[data-delete-screening]").forEach((button) => {
-    button.addEventListener("click", () => void removeScreening(button.dataset.deleteScreening || ""));
+    button.addEventListener("click", () => void removeEvent(button.dataset.deleteEvent || ""));
   });
 }
 
 function summaryCard(item: Summary) {
-  const href = `/admin/screenings/${encodeURIComponent(item.slug)}`;
+  const href = `/admin/events/${encodeURIComponent(item.slug)}`;
   const when = `${new Date(item.startAt).toLocaleString()} – ${new Date(item.stopAt).toLocaleString()}`;
   return `<article class="editor"><h2><a href="${href}">${esc(item.title)}</a></h2><p>${esc(item.slug)}${item.venue ? ` · ${esc(item.venue)}` : ""}</p><p>${esc(when)}</p><div class="admin-actions"><a class="button secondary" href="${href}/results">Results</a><a class="button secondary" href="${href}">Edit</a><button class="button danger" type="button" data-delete-screening="${esc(item.slug)}">Delete</button></div></article>`;
 }
 
-async function removeScreening(slug: string) {
+async function removeEvent(slug: string) {
   if (!confirm(`Delete ${slug}? This removes its polls, votes, codes, and images.`)) return;
   try {
-    await api(`/api/admin/screenings/${encodeURIComponent(slug)}`, { method: "DELETE" });
+    await api(`/api/admin/events/${encodeURIComponent(slug)}`, { method: "DELETE" });
     sessionStorage.setItem(noticeKey, JSON.stringify({ text: `Deleted ${slug}.`, error: false }));
     location.assign("/admin");
   } catch (err) { fail(err); }
@@ -203,7 +203,7 @@ async function removeScreening(slug: string) {
 
 async function resultsScreen(gen: number, slug: string) {
   paint(shell("Results", "<p>Loading…</p>"));
-  const data = await api<ScreeningResults>(resultsPath(slug));
+  const data = await api<EventResults>(resultsPath(slug));
   if (gen !== generation) return;
   latestResults = data;
   noteResultsSkew(data.now);
@@ -214,7 +214,7 @@ async function resultsScreen(gen: number, slug: string) {
 }
 
 function resultsPath(slug: string) {
-  return `/api/admin/screenings/${encodeURIComponent(slug)}/results`;
+  return `/api/admin/events/${encodeURIComponent(slug)}/results`;
 }
 
 function ballotLabel(count: number) {
@@ -225,9 +225,9 @@ function voteLabel(count: number) {
   return `${count} ${count === 1 ? "vote" : "votes"}`;
 }
 
-function resultsBody(data: ScreeningResults) {
+function resultsBody(data: EventResults) {
   const polls = data.polls.map(resultPoll).join("") || "<p>No polls yet.</p>";
-  return `<p><a href="/admin/screenings/${encodeURIComponent(data.slug)}">Edit event</a></p><p data-result-ballots>${ballotLabel(data.ballots)}</p><div id="results">${polls}</div>`;
+  return `<p><a href="/admin/events/${encodeURIComponent(data.slug)}">Edit event</a></p><p data-result-ballots>${ballotLabel(data.ballots)}</p><div id="results">${polls}</div>`;
 }
 
 function resultPoll(poll: ResultPoll) {
@@ -240,11 +240,11 @@ function resultOption(poll: ResultPoll, option: ResultOption) {
   return `<div class="result-row" data-result-option="${esc(option.id)}"><div class="result-label"><span>${esc(option.title)}</span><span data-result-count>${option.votes} · ${Math.round(share)}%</span></div><div class="result-track" aria-hidden="true"><span class="result-fill" style="width:${share}%"></span></div></div>`;
 }
 
-function resultShape(data: ScreeningResults) {
+function resultShape(data: EventResults) {
   return data.polls.map((poll) => `${poll.id}:${poll.options.map((option) => option.id).sort().join(",")}`).join("|");
 }
 
-function applyResults(data: ScreeningResults) {
+function applyResults(data: EventResults) {
   latestResults = data;
   noteResultsSkew(data.now);
   const root = document.querySelector<HTMLElement>("#results");
@@ -374,7 +374,7 @@ function startResultsLive(gen: number, slug: string) {
 
 async function refreshResults(gen: number, slug: string) {
   try {
-    const data = await api<ScreeningResults>(resultsPath(slug));
+    const data = await api<EventResults>(resultsPath(slug));
     if (gen !== generation) return;
     applyResults(data);
   } catch {
@@ -384,7 +384,7 @@ async function refreshResults(gen: number, slug: string) {
 
 function newScreen() {
   paint(shell("New event", `<form id="screening-form" class="editor"><p class="help">After this, you can add a banner, polls, options, and vote codes.</p>${screeningFields(null)}<div class="admin-actions"><button class="button primary" type="submit">Create event</button></div></form>`));
-  bindScreeningForm(null);
+  bindEventForm(null);
 }
 
 function votingControls() {
@@ -411,7 +411,7 @@ async function startPollNow(screeningSlug: string, poll: TimedPoll, reload: () =
     return;
   }
   try {
-    await api(`/api/admin/screenings/${encodeURIComponent(screeningSlug)}/polls/${encodeURIComponent(poll.slug)}`, { method: "PATCH", body: JSON.stringify(startNow()) });
+    await api(`/api/admin/events/${encodeURIComponent(screeningSlug)}/polls/${encodeURIComponent(poll.slug)}`, { method: "PATCH", body: JSON.stringify(startNow()) });
     showMessage(`${poll.title} opens now.`);
     await reload();
   } catch (err) { fail(err); }
@@ -420,7 +420,7 @@ async function startPollNow(screeningSlug: string, poll: TimedPoll, reload: () =
 async function stopPoll(screeningSlug: string, poll: TimedPoll, minutes: number, reload: () => Promise<void>) {
   try {
     const body = minutes === 0 ? stopNow(poll.startAt) : stopInMinutes(poll.startAt, minutes);
-    await api(`/api/admin/screenings/${encodeURIComponent(screeningSlug)}/polls/${encodeURIComponent(poll.slug)}`, { method: "PATCH", body: JSON.stringify(body) });
+    await api(`/api/admin/events/${encodeURIComponent(screeningSlug)}/polls/${encodeURIComponent(poll.slug)}`, { method: "PATCH", body: JSON.stringify(body) });
     showMessage(minutes === 0 ? `${poll.title} is closed.` : `${poll.title} stops in ${minutes} ${minutes === 1 ? "minute" : "minutes"}.`);
     await reload();
   } catch (err) { fail(err); }
@@ -432,11 +432,11 @@ function bindVoting(root: HTMLElement, screeningSlug: string, current: () => Tim
   root.querySelector("[data-stop-in]")?.addEventListener("click", () => void stopPoll(screeningSlug, current(), clampMinutes(minutesInput?.value || ""), reload));
 }
 
-function screeningFields(screening: Screening | null) {
+function screeningFields(screening: Event | null) {
   return `<div class="field-row"><label>Slug<input name="slug" required maxlength="64" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" value="${esc(screening?.slug || "")}" /></label><label>Title<input name="title" required maxlength="200" value="${esc(screening?.title || "")}" /></label></div><label>Venue<input name="venue" maxlength="200" value="${esc(screening?.venue || "")}" /></label><label>Timezone<input name="timezone" maxlength="64" value="${esc(screening?.timezone || "America/Los_Angeles")}" /></label><div class="field-row"><label>Starts<input name="startAt" type="datetime-local" required value="${screening ? toLocalInput(screening.startAt) : ""}" /></label><label>Ends<input name="stopAt" type="datetime-local" required value="${screening ? toLocalInput(screening.stopAt) : ""}" /></label></div><p class="help">Times are read in your current timezone and stored as an exact instant. A new poll copies them, then keeps its own open and close times. Changing the slug changes the public ballot URL.</p>`;
 }
 
-function bindScreeningForm(existing: Screening | null) {
+function bindEventForm(existing: Event | null) {
   document.querySelector<HTMLFormElement>("#screening-form")!.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = event.currentTarget as HTMLFormElement;
@@ -450,14 +450,14 @@ function bindScreeningForm(existing: Screening | null) {
       stopAt: fromLocalInput(String(data.stopAt || "")),
     };
     try {
-      const saved = await api<Screening>(existing ? `/api/admin/screenings/${encodeURIComponent(existing.slug)}` : "/api/admin/screenings", { method: existing ? "PATCH" : "POST", body: JSON.stringify(body) });
+      const saved = await api<Event>(existing ? `/api/admin/events/${encodeURIComponent(existing.slug)}` : "/api/admin/events", { method: existing ? "PATCH" : "POST", body: JSON.stringify(body) });
       if (existing && saved.slug === existing.slug) {
         note("Event saved.");
         await render();
         return;
       }
       sessionStorage.setItem(noticeKey, JSON.stringify({ text: existing ? "Event saved." : "Event created.", error: false }));
-      location.assign(`/admin/screenings/${encodeURIComponent(saved.slug)}`);
+      location.assign(`/admin/events/${encodeURIComponent(saved.slug)}`);
     } catch (err) { fail(err); }
   });
 }
@@ -470,14 +470,14 @@ async function editScreen(gen: number, slug: string) {
   expandOptionId = "";
   paint(shell("Event", "<p>Loading…</p>"));
   const [screening, counts] = await Promise.all([
-    api<Screening>(`/api/admin/screenings/${encodeURIComponent(slug)}`),
-    api<CodeList>(`/api/admin/screenings/${encodeURIComponent(slug)}/codes`),
+    api<Event>(`/api/admin/events/${encodeURIComponent(slug)}`),
+    api<CodeList>(`/api/admin/events/${encodeURIComponent(slug)}/codes`),
   ]);
   if (gen !== generation) return;
   paint(shell(screening.title, editBody(screening, counts)));
-  bindScreeningForm(screening);
+  bindEventForm(screening);
   bindBanner(screening);
-  bindDeleteScreening(screening);
+  bindDeleteEvent(screening);
   for (const poll of screening.polls) {
     bindPoll(screening, poll);
     for (const option of poll.options) bindOption(screening, poll, option);
@@ -490,10 +490,10 @@ async function editScreen(gen: number, slug: string) {
   bindCodes(screening);
 }
 
-function editBody(screening: Screening, counts: CodeList) {
+function editBody(screening: Event, counts: CodeList) {
   const hasPolls = screening.polls.length > 0;
   const polls = hasPolls ? `<div id="poll-list" class="sheet-list">${screening.polls.map((poll) => pollBlock(screening, poll)).join("")}</div>` : "<p>No polls yet.</p>";
-  return `<p><a href="${esc(screening.links.ballot)}">Ballot page</a> · <a href="/api/screenings/${encodeURIComponent(screening.slug)}">Public JSON</a></p>
+  return `<p><a href="${esc(screening.links.ballot)}">Ballot page</a> · <a href="/api/events/${encodeURIComponent(screening.slug)}">Public JSON</a></p>
     <form id="screening-form" class="editor"><h2>Event</h2>${screeningFields(screening)}<div class="admin-actions"><button class="button primary" type="submit">Save event</button><button class="button danger" type="button" id="delete-screening">Delete event</button></div></form>
     <section class="editor" id="banner-section"><h2>Banner</h2>${screening.bannerImage ? `<img class="banner-preview" alt="" src="${esc(screening.bannerImage)}">` : "<p>No banner yet.</p>"}<label>Image file<input id="banner-file" type="file" accept="${imageAccept}"></label><div class="admin-actions"><button class="button secondary" type="button" id="upload-banner">Upload banner</button>${screening.bannerImageKey ? `<button class="button danger" type="button" id="clear-banner">Remove banner</button>` : ""}</div><p class="help">Filenames use letters, numbers, dots, hyphens, and underscores. Uploading the same name replaces that file.</p></section>
     <h2 class="section-title">Polls</h2>${polls}
@@ -502,7 +502,7 @@ function editBody(screening: Screening, counts: CodeList) {
     <section class="editor codes-sheet"><h2>Vote codes</h2><p>${counts.total} total · ${counts.unused} unused · ${counts.used} used</p><p class="help">Each code's URL is https://vote.sandiego48.com/c/CODE, which enters that code. A code can update any poll that is still open. The download lists every code, whether it has been used, and its URL. Typing ignores spaces and hyphens.</p><p class="help">Reset voting deletes every code and every cast vote. Polls, films, and images stay.</p>${counts.unlisted ? `<p class="help">${counts.unlisted} older ${counts.unlisted === 1 ? "code was" : "codes were"} saved before downloads existed. ${counts.unlisted === 1 ? "It still works" : "They still work"} and ${counts.unlisted === 1 ? "is" : "are"} not in the file.</p>` : ""}<form id="codes-form"><label class="codes-count">How many<input name="count" type="number" min="1" max="500" required></label><div class="admin-actions"><button class="button primary" type="submit">Generate codes</button><button class="button secondary" type="button" id="download-codes">Download codes</button>${counts.unused ? `<button class="button danger" type="button" id="remove-codes">Remove unused codes</button>` : ""}<button class="button danger" type="button" id="reset-voting">Reset voting</button></div></form></section>`;
 }
 
-function pollBlock(screening: Screening, poll: Poll) {
+function pollBlock(screening: Event, poll: Poll) {
   const hasOptions = poll.options.length > 0;
   const options = poll.options.map((option) => optionSheet(poll, option)).join("");
   const empty = hasOptions ? "" : `<p class="help">No options yet.</p>`;
@@ -521,7 +521,7 @@ function sheetBar(label: string, title: string, panelId: string) {
   return `<div class="sheet-bar"><button type="button" class="drag" aria-label="${esc(label)}"><span class="grip" aria-hidden="true"></span></button><button type="button" class="sheet-toggle" aria-expanded="false" aria-controls="${esc(panelId)}"><span class="sheet-name">${esc(title)}</span></button></div>`;
 }
 
-function newPollForm(screening: Screening, open: boolean) {
+function newPollForm(screening: Event, open: boolean) {
   return `<form id="new-poll" class="editor"${open ? "" : " hidden"}><h2>New poll</h2>${pollFields(screening, null)}<div class="admin-actions"><button class="button primary" type="submit">Add poll</button>${collapseButton(open)}</div></form>`;
 }
 
@@ -533,7 +533,7 @@ function collapseButton(open: boolean) {
   return open ? "" : `<button class="button secondary" type="button" data-collapse>Cancel</button>`;
 }
 
-function pollFields(screening: Screening, poll: Poll | null) {
+function pollFields(screening: Event, poll: Poll | null) {
   const config = poll?.imageConfig;
   const start = toLocalInput(poll?.startAt || screening.startAt);
   const stop = toLocalInput(poll?.stopAt || screening.stopAt);
@@ -579,31 +579,31 @@ function bindReveals() {
   });
 }
 
-function bindBanner(screening: Screening) {
+function bindBanner(screening: Event) {
   document.querySelector("#upload-banner")!.addEventListener("click", async () => {
     const file = document.querySelector<HTMLInputElement>("#banner-file")!.files?.[0];
     if (!file) { showMessage("Choose a banner image first.", true); return; }
     try {
       const key = await upload(screening.slug, file);
-      await api(`/api/admin/screenings/${encodeURIComponent(screening.slug)}`, { method: "PATCH", body: JSON.stringify({ bannerImageKey: key }) });
+      await api(`/api/admin/events/${encodeURIComponent(screening.slug)}`, { method: "PATCH", body: JSON.stringify({ bannerImageKey: key }) });
       note("Banner saved.");
       await render();
     } catch (err) { fail(err); }
   });
   document.querySelector("#clear-banner")?.addEventListener("click", async () => {
     try {
-      await api(`/api/admin/screenings/${encodeURIComponent(screening.slug)}`, { method: "PATCH", body: JSON.stringify({ bannerImageKey: null }) });
+      await api(`/api/admin/events/${encodeURIComponent(screening.slug)}`, { method: "PATCH", body: JSON.stringify({ bannerImageKey: null }) });
       note("Banner removed.");
       await render();
     } catch (err) { fail(err); }
   });
 }
 
-function bindDeleteScreening(screening: Screening) {
-  document.querySelector("#delete-screening")!.addEventListener("click", () => void removeScreening(screening.slug));
+function bindDeleteEvent(screening: Event) {
+  document.querySelector("#delete-screening")!.addEventListener("click", () => void removeEvent(screening.slug));
 }
 
-function bindPoll(screening: Screening, poll: Poll) {
+function bindPoll(screening: Event, poll: Poll) {
   const form = document.querySelector<HTMLFormElement>(`#poll-${poll.id}`)!;
   const ratio = form.querySelector<HTMLInputElement>("[name=aspectRatio]");
   let timer = 0;
@@ -613,7 +613,7 @@ function bindPoll(screening: Screening, poll: Poll) {
   };
   const persistPoll = () => enqueue(`poll:${poll.id}`, async () => {
     if (!form.isConnected || !form.checkValidity()) return;
-    const saved = await api<Poll>(`/api/admin/screenings/${encodeURIComponent(screening.slug)}/polls/${encodeURIComponent(poll.slug)}`, { method: "PATCH", body: JSON.stringify(pollBody(form)) });
+    const saved = await api<Poll>(`/api/admin/events/${encodeURIComponent(screening.slug)}/polls/${encodeURIComponent(poll.slug)}`, { method: "PATCH", body: JSON.stringify(pollBody(form)) });
     poll.slug = saved.slug;
     poll.title = saved.title;
     showMessage("Saved.");
@@ -643,7 +643,7 @@ function bindPoll(screening: Screening, poll: Poll) {
   form.querySelector<HTMLButtonElement>("[data-delete-poll]")!.addEventListener("click", async () => {
     if (!confirm(`Delete poll ${poll.title}?`)) return;
     try {
-      await api(`/api/admin/screenings/${encodeURIComponent(screening.slug)}/polls/${encodeURIComponent(poll.slug)}`, { method: "DELETE" });
+      await api(`/api/admin/events/${encodeURIComponent(screening.slug)}/polls/${encodeURIComponent(poll.slug)}`, { method: "DELETE" });
       note("Poll deleted.");
       await render();
     } catch (err) { fail(err); }
@@ -654,12 +654,12 @@ function bindPoll(screening: Screening, poll: Poll) {
   if (list) bindReorder(list, ".option-sheet", () => void persistOptionOrder(screening, poll, list));
 }
 
-function bindNewPoll(screening: Screening) {
+function bindNewPoll(screening: Event) {
   document.querySelector<HTMLFormElement>("#new-poll")!.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = event.currentTarget as HTMLFormElement;
     try {
-      const saved = await api<Poll>(`/api/admin/screenings/${encodeURIComponent(screening.slug)}/polls`, { method: "POST", body: JSON.stringify(pollBody(form)) });
+      const saved = await api<Poll>(`/api/admin/events/${encodeURIComponent(screening.slug)}/polls`, { method: "POST", body: JSON.stringify(pollBody(form)) });
       expandPollId = saved.id;
       note("Poll added.");
       await render();
@@ -686,7 +686,7 @@ function pollBody(form: HTMLFormElement) {
   return body;
 }
 
-function bindOption(screening: Screening, poll: Poll, option: Option) {
+function bindOption(screening: Event, poll: Poll, option: Option) {
   const form = document.querySelector<HTMLFormElement>(`#option-${option.id}`)!;
   let timer = 0;
   const schedule = () => {
@@ -756,7 +756,7 @@ function bindOption(screening: Screening, poll: Poll, option: Option) {
   });
 }
 
-function bindNewOption(screening: Screening, poll: Poll) {
+function bindNewOption(screening: Event, poll: Poll) {
   document.querySelector<HTMLFormElement>(`#new-option-${poll.id}`)!.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = event.currentTarget as HTMLFormElement;
@@ -765,7 +765,7 @@ function bindNewOption(screening: Screening, poll: Poll) {
       const imageKeys = file ? [await upload(screening.slug, file)] : [];
       const data = formValues(form);
       const body = { title: String(data.title || ""), description: String(data.description || "") || null, imageKeys };
-      const saved = await api<Option>(`/api/admin/screenings/${encodeURIComponent(screening.slug)}/polls/${encodeURIComponent(poll.slug)}/options`, { method: "POST", body: JSON.stringify(body) });
+      const saved = await api<Option>(`/api/admin/events/${encodeURIComponent(screening.slug)}/polls/${encodeURIComponent(poll.slug)}/options`, { method: "POST", body: JSON.stringify(body) });
       expandPollId = poll.id;
       expandOptionId = saved.id;
       note("Option added.");
@@ -774,7 +774,7 @@ function bindNewOption(screening: Screening, poll: Poll) {
   });
 }
 
-async function saveOption(screening: Screening, poll: Poll, option: Option, form: HTMLFormElement, withFile: boolean) {
+async function saveOption(screening: Event, poll: Poll, option: Option, form: HTMLFormElement, withFile: boolean) {
   const data = formValues(form);
   const body: Record<string, unknown> = { title: String(data.title || ""), description: String(data.description || "") || null };
   if (withFile) {
@@ -786,8 +786,8 @@ async function saveOption(screening: Screening, poll: Poll, option: Option, form
   return api<Option>(optionPath(screening, poll, option.id), { method: "PATCH", body: JSON.stringify(body) });
 }
 
-function optionPath(screening: Screening, poll: Poll, optionId: string) {
-  return `/api/admin/screenings/${encodeURIComponent(screening.slug)}/polls/${encodeURIComponent(poll.slug)}/options/${encodeURIComponent(optionId)}`;
+function optionPath(screening: Event, poll: Poll, optionId: string) {
+  return `/api/admin/events/${encodeURIComponent(screening.slug)}/polls/${encodeURIComponent(poll.slug)}/options/${encodeURIComponent(optionId)}`;
 }
 
 function rememberSheets() {
@@ -839,18 +839,18 @@ function enqueue(key: string, job: () => Promise<void>) {
   return next;
 }
 
-function bindPollDrag(screening: Screening) {
+function bindPollDrag(screening: Event) {
   const list = document.querySelector<HTMLElement>("#poll-list");
   if (!list) return;
   bindReorder(list, ".poll-block", () => void persistPollOrder(screening, list));
 }
 
-async function persistPollOrder(screening: Screening, list: HTMLElement) {
+async function persistPollOrder(screening: Event, list: HTMLElement) {
   const slugs = Array.from(list.querySelectorAll<HTMLElement>(":scope > .poll-block")).map((block) => screening.polls.find((item) => item.id === block.dataset.pollId)?.slug || "");
   if (slugs.some((slug) => !slug)) return;
   if (slugs.every((slug, index) => screening.polls[index]?.slug === slug)) return;
   try {
-    await api(`/api/admin/screenings/${encodeURIComponent(screening.slug)}/polls/order`, { method: "PUT", body: JSON.stringify({ slugs }) });
+    await api(`/api/admin/events/${encodeURIComponent(screening.slug)}/polls/order`, { method: "PUT", body: JSON.stringify({ slugs }) });
     const bySlug = new Map(screening.polls.map((poll) => [poll.slug, poll]));
     screening.polls = slugs.map((slug, index) => {
       const poll = bySlug.get(slug)!;
@@ -861,12 +861,12 @@ async function persistPollOrder(screening: Screening, list: HTMLElement) {
   } catch (err) { fail(err); }
 }
 
-async function persistOptionOrder(screening: Screening, poll: Poll, list: HTMLElement) {
+async function persistOptionOrder(screening: Event, poll: Poll, list: HTMLElement) {
   const ids = Array.from(list.querySelectorAll<HTMLElement>(":scope > .option-sheet")).map((sheet) => sheet.dataset.optionId || "");
   if (ids.some((id) => !id)) return;
   if (ids.every((id, index) => poll.options[index]?.id === id)) return;
   try {
-    await api(`/api/admin/screenings/${encodeURIComponent(screening.slug)}/polls/${encodeURIComponent(poll.slug)}/options/order`, { method: "PUT", body: JSON.stringify({ ids }) });
+    await api(`/api/admin/events/${encodeURIComponent(screening.slug)}/polls/${encodeURIComponent(poll.slug)}/options/order`, { method: "PUT", body: JSON.stringify({ ids }) });
     const byId = new Map(poll.options.map((option) => [option.id, option]));
     poll.options = ids.map((id, index) => {
       const option = byId.get(id)!;
@@ -923,13 +923,13 @@ function bindReorder(list: HTMLElement, itemSelector: string, onDrop: () => void
   });
 }
 
-function bindCodes(screening: Screening) {
+function bindCodes(screening: Event) {
   const form = document.querySelector<HTMLFormElement>("#codes-form")!;
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const count = Number(formValues(form).count);
     try {
-      const result = await api<{ created: string[] }>(`/api/admin/screenings/${encodeURIComponent(screening.slug)}/codes`, { method: "POST", body: JSON.stringify({ count }) });
+      const result = await api<{ created: string[] }>(`/api/admin/events/${encodeURIComponent(screening.slug)}/codes`, { method: "POST", body: JSON.stringify({ count }) });
       note(`Generated ${result.created.length} codes.`);
       await render();
     } catch (err) { fail(err); }
@@ -945,9 +945,9 @@ function clampMinutes(value: string) {
   return Math.min(240, Math.max(0, minutes));
 }
 
-async function downloadCodes(screening: Screening) {
+async function downloadCodes(screening: Event) {
   try {
-    const list = await api<CodeList>(`/api/admin/screenings/${encodeURIComponent(screening.slug)}/codes`);
+    const list = await api<CodeList>(`/api/admin/events/${encodeURIComponent(screening.slug)}/codes`);
     if (!list.codes.length) { showMessage("There are no codes to download.", true); return; }
     const lines = ["code,used,url", ...list.codes.map((item) => `${item.code},${item.used ? "yes" : "no"},${voteCodeUrl(item.code)}`)];
     const url = URL.createObjectURL(new Blob([`${lines.join("\n")}\n`], { type: "text/csv;charset=utf-8" }));
@@ -963,19 +963,19 @@ async function downloadCodes(screening: Screening) {
   } catch (err) { fail(err); }
 }
 
-async function removeUnusedCodes(screening: Screening) {
+async function removeUnusedCodes(screening: Event) {
   if (!confirm("Remove every unused code? Used codes stay, and votes are not deleted.")) return;
   try {
-    const result = await api<{ deleted: number }>(`/api/admin/screenings/${encodeURIComponent(screening.slug)}/codes`, { method: "DELETE" });
+    const result = await api<{ deleted: number }>(`/api/admin/events/${encodeURIComponent(screening.slug)}/codes`, { method: "DELETE" });
     note(`Removed ${result.deleted} unused codes.`);
     await render();
   } catch (err) { fail(err); }
 }
 
-async function resetVoting(screening: Screening) {
+async function resetVoting(screening: Event) {
   if (!confirm(`Reset voting for ${screening.title}? This deletes every vote code and every cast vote. Polls, films, and images stay.`)) return;
   try {
-    const result = await api<{ codes: number; votes: number }>(`/api/admin/screenings/${encodeURIComponent(screening.slug)}/reset`, { method: "POST" });
+    const result = await api<{ codes: number; votes: number }>(`/api/admin/events/${encodeURIComponent(screening.slug)}/reset`, { method: "POST" });
     const codes = `${result.codes} ${result.codes === 1 ? "code" : "codes"}`;
     const votes = `${result.votes} ${result.votes === 1 ? "vote" : "votes"}`;
     note(`Reset voting. Removed ${codes} and ${votes}.`);
@@ -987,7 +987,7 @@ async function upload(slug: string, file: File) {
   const filename = uploadName(file);
   const type = fileType(file);
   if (!filename || !type) throw new ApiError("Use a jpeg, png, webp, gif, or svg whose name is letters, numbers, dots, hyphens, and underscores.", 400);
-  const result = await api<{ key: string }>(`/api/admin/screenings/${encodeURIComponent(slug)}/images`, { method: "POST", headers: { "content-type": type, "x-filename": filename }, body: file });
+  const result = await api<{ key: string }>(`/api/admin/events/${encodeURIComponent(slug)}/images`, { method: "POST", headers: { "content-type": type, "x-filename": filename }, body: file });
   return result.key;
 }
 

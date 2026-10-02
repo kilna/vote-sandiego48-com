@@ -8,9 +8,9 @@ const now = Date.parse("2026-05-01T20:00:00Z");
 describe("ballot sync", () => {
   it("folds one code's polls and stored picks", () => {
     const state = foldBallot([
-      { screening_id: "s1", slug: "spring", title: "Spring", used_at: "2026-05-01T19:00:00Z", poll_id: "p1", voting: "scheduled", start_at: "2026-05-01T19:00:00Z", stop_at: "2026-05-01T21:00:00Z", option_id: "o1" },
-      { screening_id: "s1", slug: "spring", title: "Spring", used_at: "2026-05-01T19:00:00Z", poll_id: "p1", voting: "scheduled", start_at: "2026-05-01T19:00:00Z", stop_at: "2026-05-01T21:00:00Z", option_id: "o2" },
-      { screening_id: "s1", slug: "spring", title: "Spring", used_at: "2026-05-01T19:00:00Z", poll_id: "p2", voting: "closed", start_at: "2026-05-01T18:00:00Z", stop_at: "2026-05-01T19:00:00Z", option_id: null },
+      { event_id: "s1", slug: "spring", title: "Spring", used_at: "2026-05-01T19:00:00Z", poll_id: "p1", voting: "scheduled", start_at: "2026-05-01T19:00:00Z", stop_at: "2026-05-01T21:00:00Z", option_id: "o1" },
+      { event_id: "s1", slug: "spring", title: "Spring", used_at: "2026-05-01T19:00:00Z", poll_id: "p1", voting: "scheduled", start_at: "2026-05-01T19:00:00Z", stop_at: "2026-05-01T21:00:00Z", option_id: "o2" },
+      { event_id: "s1", slug: "spring", title: "Spring", used_at: "2026-05-01T19:00:00Z", poll_id: "p2", voting: "closed", start_at: "2026-05-01T18:00:00Z", stop_at: "2026-05-01T19:00:00Z", option_id: null },
     ], now);
     expect(state?.slug).toBe("spring");
     expect(state?.used).toBe(true);

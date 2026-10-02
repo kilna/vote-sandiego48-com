@@ -19,7 +19,7 @@ type Poll = {
   votingOpen?: boolean;
   options: { id: string; title: string; description?: string; images: string[] }[];
 };
-type Screening = { id: string; slug: string; title: string; venue?: string; bannerImage?: string; startAt: string; stopAt: string; polls: Poll[] };
+type Event = { id: string; slug: string; title: string; venue?: string; bannerImage?: string; startAt: string; stopAt: string; polls: Poll[] };
 type Entry = { code: string; slug: string; selections?: Record<string, string[]> };
 type Entered = { slug: string; title: string; used: boolean; selections: Record<string, string[]> };
 
@@ -27,7 +27,7 @@ const app = document.querySelector<HTMLDivElement>("#app")!;
 const slug = decodeURIComponent(location.pathname.match(/^\/s\/([^/]+)/)?.[1] || "");
 const codePath = location.pathname.match(/^\/c\/([^/]+)/)?.[1] || "";
 const entryKey = "sd48-vote-entry";
-let current: Screening;
+let current: Event;
 let activeCode = "";
 let selections: Record<string, string[]> = {};
 let saveFlight: Promise<void> | null = null;
@@ -75,7 +75,7 @@ function notStarted(poll: Poll) {
   return Number.isFinite(start) && serverNow() < start;
 }
 
-function render(s: Screening) {
+function render(s: Event) {
   window.clearInterval(watch);
   cycles.forEach((id) => window.clearInterval(id));
   cycles = [];
@@ -155,7 +155,7 @@ async function saveSelections() {
   const writesAtSend = writes;
   let applied = false;
   try {
-    const response = await fetch("/api/vote", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ screeningId: current.id, code: activeCode, selections: chosen }) });
+    const response = await fetch("/api/vote", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ eventId: current.id, code: activeCode, selections: chosen }) });
     const data = await response.json().catch(() => null) as (BallotSnapshot & { error?: string }) | null;
     if (data && isSnapshot(data)) {
       applyWindows(data);
@@ -392,10 +392,10 @@ async function enter(code: string) {
   return { slug: data.slug, title: data.title || "", used: Boolean(data.used), selections: data.selections || {} } satisfies Entered;
 }
 
-async function loadScreening(screeningSlug: string) {
-  const response = await fetch("/api/screenings/" + encodeURIComponent(screeningSlug));
+async function loadEvent(screeningSlug: string) {
+  const response = await fetch("/api/events/" + encodeURIComponent(screeningSlug));
   if (!response.ok) throw Error("Event not found");
-  return response.json() as Promise<Screening>;
+  return response.json() as Promise<Event>;
 }
 
 function renderGate(message = "", code = "") {
@@ -433,13 +433,13 @@ async function openCode(raw: string) {
   }
 }
 
-async function openScreening() {
+async function openEvent() {
   const entry = loadEntry();
   if (!entry || entry.slug !== slug) { clearEntry(); location.replace("/"); return; }
   activeCode = entry.code;
   selections = entry.selections || {};
   try {
-    const [screening, entered] = await Promise.all([loadScreening(slug), enter(entry.code)]);
+    const [screening, entered] = await Promise.all([loadEvent(slug), enter(entry.code)]);
     if (entered.slug !== slug) { clearEntry(); location.replace("/"); return; }
     selections = entered.selections;
     saveEntry({ code: entry.code, slug: entered.slug, selections });
@@ -455,5 +455,5 @@ bindPosterZoom(app);
 
 if (location.pathname === "/admin" || location.pathname.startsWith("/admin/")) startAdmin();
 else if (codePath) void openCode(codePath);
-else if (slug) void openScreening();
+else if (slug) void openEvent();
 else renderGate();

@@ -4,16 +4,16 @@ import type { Env } from "../types";
 import { votingOpen } from "../voting";
 
 export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
-  const body = await request.json<{ screeningId: string; code: string; selections: Record<string, string[]> }>().catch(() => null);
-  if (!body?.screeningId || !body.code || !body.selections || typeof body.selections !== "object" || Array.isArray(body.selections)) {
-    return Response.json({ error: "screeningId, code, and selections are required" }, { status: 400 });
+  const body = await request.json<{ eventId: string; code: string; selections: Record<string, string[]> }>().catch(() => null);
+  if (!body?.eventId || !body.code || !body.selections || typeof body.selections !== "object" || Array.isArray(body.selections)) {
+    return Response.json({ error: "eventId, code, and selections are required" }, { status: 400 });
   }
   const codeHash = await hashCode(body.code);
-  const codeRow = await env.DB.prepare("SELECT code_hash FROM vote_codes WHERE code_hash = ? AND screening_id = ?").bind(codeHash, body.screeningId).first();
+  const codeRow = await env.DB.prepare("SELECT code_hash FROM vote_codes WHERE code_hash = ? AND event_id = ?").bind(codeHash, body.eventId).first();
   if (!codeRow) return Response.json({ error: "Invalid vote code" }, { status: 403 });
   const pollIds = Object.keys(body.selections);
   if (!pollIds.length) return Response.json({ error: "selections are required" }, { status: 400 });
-  const polls = await env.DB.prepare("SELECT * FROM polls WHERE screening_id = ?").bind(body.screeningId).all<any>();
+  const polls = await env.DB.prepare("SELECT * FROM polls WHERE event_id = ?").bind(body.eventId).all<any>();
   const byId = new Map(polls.results.map((poll) => [poll.id, poll]));
   const statements: D1PreparedStatement[] = [];
   let updated = 0;
@@ -30,7 +30,7 @@ export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
     }
     statements.push(env.DB.prepare("DELETE FROM votes WHERE code_hash = ? AND poll_id = ?").bind(codeHash, poll.id));
     for (const optionId of selected) {
-      statements.push(env.DB.prepare("INSERT INTO votes (id, screening_id, poll_id, option_id, code_hash) VALUES (?, ?, ?, ?, ?)").bind(crypto.randomUUID(), body.screeningId, poll.id, optionId, codeHash));
+      statements.push(env.DB.prepare("INSERT INTO votes (id, event_id, poll_id, option_id, code_hash) VALUES (?, ?, ?, ?, ?)").bind(crypto.randomUUID(), body.eventId, poll.id, optionId, codeHash));
     }
     updated += 1;
   }
