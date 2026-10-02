@@ -1130,8 +1130,8 @@ input:not([type="radio"]):not([type="checkbox"]):focus-visible {
 }
 
 @font-face {
-  font-family: "DSEG7Classic";
-  src: url("/fonts/DSEG7ClassicMini-BoldItalic.ttf") format("truetype");
+  font-family: "48HFP-Countdown";
+  src: url("/fonts/48HFP-Countdown.ttf") format("truetype");
   font-weight: bold;
   font-style: italic;
   font-display: swap;
@@ -1174,7 +1174,7 @@ input:not([type="radio"]):not([type="checkbox"]):focus-visible {
 .result-poll .window { margin: 0.45rem 0 0.2rem; }
 
 .clock {
-  font-family: "DSEG7Classic", monospace;
+  font-family: "48HFP-Countdown", monospace;
   font-size: 0.85em;
   transform: translateY(0.1em);
   display: inline-block;
