@@ -387,8 +387,13 @@ function newScreen() {
   bindEventForm(null);
 }
 
+function stopLabel(minutes: number) {
+  if (minutes === 0) return "Stop voting now";
+  return `Stop voting in ${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
+}
+
 function votingControls() {
-  return `<div class="vote-controls"><button class="button primary" type="button" data-start-now>Start voting</button><p class="stop-in">Stop voting in <input type="number" min="0" max="240" value="5" data-stop-minutes aria-label="Minutes"> minutes <button class="button danger" type="button" data-stop-in>Stop Voting</button></p></div>`;
+  return `<div class="vote-controls"><button class="button primary" type="button" data-start-now>Start voting</button><p class="stop-in"><button class="button danger" type="button" data-stop-in>${stopLabel(5)}</button><input type="number" min="0" max="240" value="5" data-stop-minutes aria-label="Minutes"></p></div>`;
 }
 
 function votingStatus(poll: Poll) {
@@ -400,7 +405,7 @@ function votingStatus(poll: Poll) {
 }
 
 function pollVoting(poll: Poll) {
-  return `<section class="poll-voting"><p class="window ${poll.votingOpen ? "open" : "closed"}">${esc(votingStatus(poll))}</p><p class="help">Picks are saved from the open time until the close time. Start voting sets the open time to now. Stop Voting sets the close time that many minutes from now. Zero closes it now.</p>${votingControls()}</section>`;
+  return `<section class="poll-voting"><p class="window ${poll.votingOpen ? "open" : "closed"}">${esc(votingStatus(poll))}</p><p class="help">Picks are saved from the open time until the close time. Start voting sets the open time to now. Stop voting in X minutes sets the close time that far ahead. Zero closes it now.</p>${votingControls()}</section>`;
 }
 
 type TimedPoll = { slug: string; title: string; startAt: string; stopAt: string };
@@ -429,7 +434,10 @@ async function stopPoll(screeningSlug: string, poll: TimedPoll, minutes: number,
 function bindVoting(root: HTMLElement, screeningSlug: string, current: () => TimedPoll, reload: () => Promise<void>) {
   root.querySelector("[data-start-now]")?.addEventListener("click", () => void startPollNow(screeningSlug, current(), reload));
   const minutesInput = root.querySelector<HTMLInputElement>("[data-stop-minutes]");
-  root.querySelector("[data-stop-in]")?.addEventListener("click", () => void stopPoll(screeningSlug, current(), clampMinutes(minutesInput?.value || ""), reload));
+  const stopButton = root.querySelector<HTMLButtonElement>("[data-stop-in]");
+  const paintStop = () => { if (stopButton) stopButton.textContent = stopLabel(clampMinutes(minutesInput?.value || "")); };
+  minutesInput?.addEventListener("input", paintStop);
+  stopButton?.addEventListener("click", () => void stopPoll(screeningSlug, current(), clampMinutes(minutesInput?.value || ""), reload));
 }
 
 function screeningFields(screening: Event | null) {
@@ -499,7 +507,7 @@ function editBody(screening: Event, counts: CodeList) {
     <h2 class="section-title">Polls</h2>${polls}
     ${hasPolls ? revealButton("new-poll", "Add poll", true) : ""}
     ${newPollForm(screening, !hasPolls)}
-    <section class="editor codes-sheet"><h2>Vote codes</h2><p>${counts.total} total · ${counts.unused} unused · ${counts.used} used</p><p class="help">Each code's URL is https://vote.sandiego48.com/c/CODE, which enters that code. A code can update any poll that is still open. The download lists every code, whether it has been used, and its URL. Typing ignores spaces and hyphens.</p><p class="help">Reset voting deletes every code and every cast vote. Polls, films, and images stay.</p>${counts.unlisted ? `<p class="help">${counts.unlisted} older ${counts.unlisted === 1 ? "code was" : "codes were"} saved before downloads existed. ${counts.unlisted === 1 ? "It still works" : "They still work"} and ${counts.unlisted === 1 ? "is" : "are"} not in the file.</p>` : ""}<form id="codes-form"><label class="codes-count">How many<input name="count" type="number" min="1" max="500" required></label><div class="admin-actions"><button class="button primary" type="submit">Generate codes</button><button class="button secondary" type="button" id="download-codes">Download codes</button>${counts.unused ? `<button class="button danger" type="button" id="remove-codes">Remove unused codes</button>` : ""}<button class="button danger" type="button" id="reset-voting">Reset voting</button></div></form></section>`;
+    <section class="editor codes-sheet"><h2>Vote codes</h2><p>${counts.total} total · ${counts.unused} unused · ${counts.used} used</p><p class="help">Each code's URL is https://vote.sandiego48.com/c/CODE, which enters that code. A code can update any poll that is still open. The download lists every code, whether it has been used, and its URL. Typing ignores spaces and hyphens.</p><p class="help">Reset voting deletes every code and every cast vote. Polls, films, and images stay.</p>${counts.unlisted ? `<p class="help">${counts.unlisted} older ${counts.unlisted === 1 ? "code was" : "codes were"} saved before downloads existed. ${counts.unlisted === 1 ? "It still works" : "They still work"} and ${counts.unlisted === 1 ? "is" : "are"} not in the file.</p>` : ""}<form id="codes-form"><div class="admin-actions"><button class="button secondary" type="button" id="use-code">Create and use vote code</button><p class="generate-count"><button class="button primary" type="submit" id="generate-codes">${generateLabel(1)}</button><input type="number" min="1" max="500" value="1" name="count" data-code-count aria-label="How many"></p><button class="button secondary" type="button" id="download-codes">Download codes</button><button class="button danger" type="button" id="reset-voting">Reset voting</button></div></form></section>`;
 }
 
 function pollBlock(screening: Event, poll: Poll) {
@@ -538,7 +546,7 @@ function pollFields(screening: Event, poll: Poll | null) {
   const start = toLocalInput(poll?.startAt || screening.startAt);
   const stop = toLocalInput(poll?.stopAt || screening.stopAt);
   const help = poll ? "Changes save as you edit. " : "";
-  return `<div class="field-row"><label>Slug<input name="slug" required maxlength="64" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" value="${esc(poll?.slug || "")}"></label><label>Title<input name="title" required maxlength="200" value="${esc(poll?.title || "")}"></label></div><label>Instructions<textarea name="instructions" maxlength="2000" rows="3">${esc(poll?.instructions || "")}</textarea></label><div class="field-row"><label>Minimum selections<input name="minSelections" type="number" min="0" max="100" required value="${poll?.minSelections ?? 1}"></label><label>Maximum selections<input name="maxSelections" type="number" min="0" max="100" required value="${poll?.maxSelections ?? 1}"></label></div><div class="field-row"><label>Voting opens<input name="startAt" type="datetime-local" required value="${start}"></label><label>Voting closes<input name="stopAt" type="datetime-local" required value="${stop}"></label></div><div class="field-row"><label>Aspect ratio<input name="aspectRatio" required value="${esc(config?.aspectRatio || "16:9")}"></label><label>Seconds per image<input name="cycle" type="number" min="1" max="60" required value="${config?.cycle ?? 2}"></label><label class="check">Zoomable<input name="zoomable" type="checkbox"${config?.zoomable ? " checked" : ""}></label></div><p class="help">${help}Zoomable adds a magnifier on each image so a voter can look closer. This poll opens at its open time and closes at its close time. Start voting and Stop Voting change those times.</p>`;
+  return `<div class="field-row"><label>Slug<input name="slug" required maxlength="64" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" value="${esc(poll?.slug || "")}"></label><label>Title<input name="title" required maxlength="200" value="${esc(poll?.title || "")}"></label></div><label>Instructions<textarea name="instructions" maxlength="2000" rows="3">${esc(poll?.instructions || "")}</textarea></label><div class="field-row"><label>Minimum selections<input name="minSelections" type="number" min="0" max="100" required value="${poll?.minSelections ?? 1}"></label><label>Maximum selections<input name="maxSelections" type="number" min="0" max="100" required value="${poll?.maxSelections ?? 1}"></label></div><div class="field-row"><label>Voting opens<input name="startAt" type="datetime-local" required value="${start}"></label><label>Voting closes<input name="stopAt" type="datetime-local" required value="${stop}"></label></div><div class="field-row"><label>Aspect ratio<input name="aspectRatio" required value="${esc(config?.aspectRatio || "16:9")}"></label><label>Seconds per image<input name="cycle" type="number" min="1" max="60" required value="${config?.cycle ?? 2}"></label><label class="check">Zoomable<input name="zoomable" type="checkbox"${config?.zoomable ? " checked" : ""}></label></div><p class="help">${help}Zoomable adds a magnifier on each image so a voter can look closer. This poll opens at its open time and closes at its close time. Start voting and Stop voting in X minutes change those times.</p>`;
 }
 
 function optionForm(poll: Poll, option: Option | null, open = true) {
@@ -923,19 +931,33 @@ function bindReorder(list: HTMLElement, itemSelector: string, onDrop: () => void
   });
 }
 
+function generateLabel(count: number) {
+  return `Generate ${count} ${count === 1 ? "code" : "codes"}`;
+}
+
+function clampCodeCount(value: string) {
+  const count = Math.round(Number(value));
+  if (!Number.isFinite(count)) return 1;
+  return Math.min(500, Math.max(1, count));
+}
+
 function bindCodes(screening: Event) {
   const form = document.querySelector<HTMLFormElement>("#codes-form")!;
+  const countInput = form.querySelector<HTMLInputElement>("[data-code-count]");
+  const generateButton = form.querySelector<HTMLButtonElement>("#generate-codes");
+  const paintCount = () => { if (generateButton) generateButton.textContent = generateLabel(clampCodeCount(countInput?.value || "")); };
+  countInput?.addEventListener("input", paintCount);
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const count = Number(formValues(form).count);
+    const count = clampCodeCount(countInput?.value || "");
     try {
       const result = await api<{ created: string[] }>(`/api/admin/events/${encodeURIComponent(screening.slug)}/codes`, { method: "POST", body: JSON.stringify({ count }) });
       note(`Generated ${result.created.length} codes.`);
       await render();
     } catch (err) { fail(err); }
   });
+  document.querySelector("#use-code")!.addEventListener("click", () => void createAndUse(screening));
   document.querySelector("#download-codes")!.addEventListener("click", () => void downloadCodes(screening));
-  document.querySelector("#remove-codes")?.addEventListener("click", () => void removeUnusedCodes(screening));
   document.querySelector("#reset-voting")!.addEventListener("click", () => void resetVoting(screening));
 }
 
@@ -943,6 +965,25 @@ function clampMinutes(value: string) {
   const minutes = Math.round(Number(value));
   if (!Number.isFinite(minutes)) return 5;
   return Math.min(240, Math.max(0, minutes));
+}
+
+async function createAndUse(screening: Event) {
+  const popup = window.open("", "_blank");
+  if (!popup) {
+    showMessage("Allow pop-ups to open the new vote code.", true);
+    return;
+  }
+  try {
+    const result = await api<{ created: string[] }>(`/api/admin/events/${encodeURIComponent(screening.slug)}/codes`, { method: "POST", body: JSON.stringify({ count: 1 }) });
+    const code = result.created[0];
+    if (!code) throw new ApiError("No vote code was created.", 500);
+    popup.location.href = `${location.origin}/c/${encodeURIComponent(code)}`;
+    note(`Opened ${code}.`);
+    await render();
+  } catch (err) {
+    popup.close();
+    fail(err);
+  }
 }
 
 async function downloadCodes(screening: Event) {
@@ -960,15 +1001,6 @@ async function downloadCodes(screening: Event) {
     URL.revokeObjectURL(url);
     const older = list.unlisted ? ` ${list.unlisted} older ${list.unlisted === 1 ? "code is" : "codes are"} not in the file.` : "";
     showMessage(`Downloaded ${list.codes.length} codes.${older}`);
-  } catch (err) { fail(err); }
-}
-
-async function removeUnusedCodes(screening: Event) {
-  if (!confirm("Remove every unused code? Used codes stay, and votes are not deleted.")) return;
-  try {
-    const result = await api<{ deleted: number }>(`/api/admin/events/${encodeURIComponent(screening.slug)}/codes`, { method: "DELETE" });
-    note(`Removed ${result.deleted} unused codes.`);
-    await render();
   } catch (err) { fail(err); }
 }
 

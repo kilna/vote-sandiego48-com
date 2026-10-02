@@ -886,7 +886,18 @@ input:not([type="radio"]):not([type="checkbox"]):focus-visible {
   outline-offset: 2px;
 }
 
-.codes-count { max-width: 12rem; }
+.generate-count {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.55rem;
+  margin: 0;
+}
+
+.generate-count input[type="number"] {
+  width: 4.75rem;
+  padding: 0.45rem 0.55rem;
+}
 
 .result-row { display: grid; gap: 0.3rem; }
 
@@ -994,6 +1005,8 @@ input:not([type="radio"]):not([type="checkbox"]):focus-visible {
 
   .admin-actions { flex-direction: column; }
   .admin-actions .button { width: 100%; }
+  .admin-actions .generate-count { width: 100%; }
+  .admin-actions .generate-count .button { width: auto; flex: 1; }
 }
 
 @media (prefers-reduced-motion: reduce) {
