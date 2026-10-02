@@ -82,13 +82,13 @@ function openZoom(images: string[], index: number, title: string, returnTo: HTML
   nav.className = "zoom-nav";
   const previous = document.createElement("button");
   previous.type = "button";
-  previous.className = "button secondary zoom-step";
+  previous.className = "button primary zoom-step";
   previous.textContent = "Previous";
   const count = document.createElement("span");
   count.className = "zoom-count";
   const next = document.createElement("button");
   next.type = "button";
-  next.className = "button secondary zoom-step";
+  next.className = "button primary zoom-step";
   next.textContent = "Next";
   nav.appendChild(previous);
   nav.appendChild(count);

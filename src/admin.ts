@@ -134,7 +134,7 @@ async function render() {
   } catch (err) {
     if (gen !== generation) return;
     fail(err);
-    if (!(err instanceof ApiError && err.status === 401)) paint(shell("Admin", `<p><a class="button secondary" href="/admin">All events</a></p>`));
+    if (!(err instanceof ApiError && err.status === 401)) paint(shell("Admin", `<p><a class="button primary" href="/admin">All events</a></p>`));
   }
 }
 
@@ -189,7 +189,7 @@ async function listScreen(gen: number) {
 function summaryCard(item: Summary) {
   const href = `/admin/events/${encodeURIComponent(item.slug)}`;
   const when = `${new Date(item.startAt).toLocaleString()} – ${new Date(item.stopAt).toLocaleString()}`;
-  return `<article class="editor"><h2><a href="${href}">${esc(item.title)}</a></h2><p>${esc(item.slug)}${item.venue ? ` · ${esc(item.venue)}` : ""}</p><p>${esc(when)}</p><div class="admin-actions"><a class="button secondary" href="${href}/results">Results</a><a class="button secondary" href="${href}">Edit</a><button class="button danger" type="button" data-delete-screening="${esc(item.slug)}">Delete</button></div></article>`;
+  return `<article class="editor"><h2><a href="${href}">${esc(item.title)}</a></h2><p>${esc(item.slug)}${item.venue ? ` · ${esc(item.venue)}` : ""}</p><p>${esc(when)}</p><div class="admin-actions"><a class="button primary" href="${href}/results">Results</a><a class="button primary" href="${href}">Edit</a><button class="button danger" type="button" data-delete-screening="${esc(item.slug)}">Delete</button></div></article>`;
 }
 
 async function removeEvent(slug: string) {
@@ -393,7 +393,7 @@ function stopLabel(minutes: number) {
 }
 
 function votingControls() {
-  return `<div class="vote-controls"><button class="button primary" type="button" data-start-now>Start voting</button><p class="stop-in"><button class="button danger" type="button" data-stop-in>${stopLabel(5)}</button><input type="number" min="0" max="240" value="5" data-stop-minutes aria-label="Minutes"></p></div>`;
+  return `<div class="vote-controls"><button class="button primary" type="button" data-start-now>Start voting</button><p class="stop-in"><button class="button primary count-button" type="button" data-stop-in>${stopLabel(5)}</button><input type="number" min="0" max="240" value="5" data-stop-minutes aria-label="Minutes"></p></div>`;
 }
 
 function votingStatus(poll: Poll) {
@@ -503,11 +503,11 @@ function editBody(screening: Event, counts: CodeList) {
   const polls = hasPolls ? `<div id="poll-list" class="sheet-list">${screening.polls.map((poll) => pollBlock(screening, poll)).join("")}</div>` : "<p>No polls yet.</p>";
   return `<p><a href="${esc(screening.links.ballot)}">Ballot page</a> · <a href="/api/events/${encodeURIComponent(screening.slug)}">Public JSON</a></p>
     <form id="screening-form" class="editor"><h2>Event</h2>${screeningFields(screening)}<div class="admin-actions"><button class="button primary" type="submit">Save event</button><button class="button danger" type="button" id="delete-screening">Delete event</button></div></form>
-    <section class="editor" id="banner-section"><h2>Banner</h2>${screening.bannerImage ? `<img class="banner-preview" alt="" src="${esc(screening.bannerImage)}">` : "<p>No banner yet.</p>"}<label>Image file<input id="banner-file" type="file" accept="${imageAccept}"></label><div class="admin-actions"><button class="button secondary" type="button" id="upload-banner">Upload banner</button>${screening.bannerImageKey ? `<button class="button danger" type="button" id="clear-banner">Remove banner</button>` : ""}</div><p class="help">Filenames use letters, numbers, dots, hyphens, and underscores. Uploading the same name replaces that file.</p></section>
+    <section class="editor" id="banner-section"><h2>Banner</h2>${screening.bannerImage ? `<img class="banner-preview" alt="" src="${esc(screening.bannerImage)}">` : "<p>No banner yet.</p>"}<label>Image file<input id="banner-file" type="file" accept="${imageAccept}"></label><div class="admin-actions"><button class="button primary" type="button" id="upload-banner">Upload banner</button>${screening.bannerImageKey ? `<button class="button danger" type="button" id="clear-banner">Remove banner</button>` : ""}</div><p class="help">Filenames use letters, numbers, dots, hyphens, and underscores. Uploading the same name replaces that file.</p></section>
     <h2 class="section-title">Polls</h2>${polls}
     ${hasPolls ? revealButton("new-poll", "Add poll", true) : ""}
     ${newPollForm(screening, !hasPolls)}
-    <section class="editor codes-sheet"><h2>Vote codes</h2><p>${counts.total} total · ${counts.unused} unused · ${counts.used} used</p><p class="help">Each code's URL is https://vote.sandiego48.com/c/CODE, which enters that code. A code can update any poll that is still open. The download lists every code, whether it has been used, and its URL. Typing ignores spaces and hyphens.</p><p class="help">Reset voting deletes every code and every cast vote. Polls, films, and images stay.</p>${counts.unlisted ? `<p class="help">${counts.unlisted} older ${counts.unlisted === 1 ? "code was" : "codes were"} saved before downloads existed. ${counts.unlisted === 1 ? "It still works" : "They still work"} and ${counts.unlisted === 1 ? "is" : "are"} not in the file.</p>` : ""}<form id="codes-form"><div class="admin-actions"><button class="button secondary" type="button" id="use-code">Create and use vote code</button><p class="generate-count"><button class="button primary" type="submit" id="generate-codes">${generateLabel(1)}</button><input type="number" min="1" max="500" value="1" name="count" data-code-count aria-label="How many"></p><button class="button secondary" type="button" id="download-codes">Download codes</button><button class="button danger" type="button" id="reset-voting">Reset voting</button></div></form></section>`;
+    <section class="editor codes-sheet"><h2>Vote codes</h2><p>${counts.total} total · ${counts.unused} unused · ${counts.used} used</p><p class="help">Each code's URL is https://vote.sandiego48.com/c/CODE, which enters that code. A code can update any poll that is still open. The download lists every code, whether it has been used, and its URL. Typing ignores spaces and hyphens.</p><p class="help">Reset voting deletes every code and every cast vote. Polls, films, and images stay.</p>${counts.unlisted ? `<p class="help">${counts.unlisted} older ${counts.unlisted === 1 ? "code was" : "codes were"} saved before downloads existed. ${counts.unlisted === 1 ? "It still works" : "They still work"} and ${counts.unlisted === 1 ? "is" : "are"} not in the file.</p>` : ""}<form id="codes-form"><div class="admin-actions"><button class="button primary" type="button" id="use-code">Create and use vote code</button><p class="generate-count"><button class="button primary count-button" type="submit" id="generate-codes">${generateLabel(1)}</button><input type="number" min="1" max="500" value="1" name="count" data-code-count aria-label="How many"></p><button class="button primary" type="button" id="download-codes">Download codes</button><button class="button danger" type="button" id="reset-voting">Reset voting</button></div></form></section>`;
 }
 
 function pollBlock(screening: Event, poll: Poll) {
@@ -534,11 +534,11 @@ function newPollForm(screening: Event, open: boolean) {
 }
 
 function revealButton(id: string, label: string, centered = false) {
-  return `<div class="admin-actions add-toggle-row${centered ? " is-centered" : ""}"><button class="button secondary add-toggle" type="button" data-reveal="${esc(id)}" aria-expanded="false" aria-controls="${esc(id)}">${esc(label)}</button></div>`;
+  return `<div class="admin-actions add-toggle-row${centered ? " is-centered" : ""}"><button class="button primary add-toggle" type="button" data-reveal="${esc(id)}" aria-expanded="false" aria-controls="${esc(id)}">${esc(label)}</button></div>`;
 }
 
 function collapseButton(open: boolean) {
-  return open ? "" : `<button class="button secondary" type="button" data-collapse>Cancel</button>`;
+  return open ? "" : `<button class="button primary" type="button" data-collapse>Cancel</button>`;
 }
 
 function pollFields(screening: Event, poll: Poll | null) {
