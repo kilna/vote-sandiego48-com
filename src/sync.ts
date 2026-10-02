@@ -23,6 +23,7 @@ export function pickMessage(
   options: { corrected: boolean; open: boolean },
 ) {
   const kind = count < poll.minSelections ? "short" : count > poll.maxSelections ? "over" : count === 0 ? "none" : "counted";
+  if (!options.open && count === 0) return { text: "No vote was cast", className: " is-short", kind: "none" };
   if (kind === "short" || kind === "over") {
     if (!options.open) return { text: "Your saved vote doesn't count", className: kind === "over" ? " is-over" : " is-short", kind: kind as PickKind };
     const need = kind === "short"
@@ -32,5 +33,5 @@ export function pickMessage(
     return { text, className: kind === "short" ? " is-short" : " is-over", kind: kind as PickKind };
   }
   if (kind === "none") return { text: "", className: "", kind };
-  return { text: "Your vote counts", className: " is-counted", kind };
+  return { text: "Your vote was submitted successfully", className: " is-counted", kind };
 }

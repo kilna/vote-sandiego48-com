@@ -32,8 +32,9 @@ describe("ballot sync", () => {
     expect(pickMessage(poll, 0, { corrected: false, open: true }).text).toBe("Select 1 more");
     expect(pickMessage(poll, 0, { corrected: true, open: true }).text).toBe("Your saved vote doesn't count. Select 1 more.");
     expect(pickMessage(poll, 3, { corrected: true, open: true }).text).toBe("Your saved vote doesn't count. Select at most 2.");
-    expect(pickMessage(poll, 0, { corrected: false, open: false }).text).toBe("Your saved vote doesn't count");
-    expect(pickMessage(poll, 1, { corrected: true, open: true }).text).toBe("Your vote counts");
+    expect(pickMessage(poll, 0, { corrected: false, open: false }).text).toBe("No vote was cast");
+    expect(pickMessage(poll, 3, { corrected: false, open: false }).text).toBe("Your saved vote doesn't count");
+    expect(pickMessage(poll, 1, { corrected: true, open: true }).text).toBe("Your vote was submitted successfully");
   });
 
   it("publishes the public state poll", () => {

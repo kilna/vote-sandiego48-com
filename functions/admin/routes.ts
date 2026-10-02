@@ -6,6 +6,7 @@ import { error, json } from "../api/http";
 import { imageContentType, imageKey, keyBelongs, MAX_IMAGE_BYTES, safeFilename } from "./images";
 import { presentOption, presentPoll, presentScreening, presentScreeningSummary, type OptionRow, type PollRow, type ScreeningRow } from "./present";
 import { adminIndex, matchAdminRoute, optionPatch, optionWrite, pollPatch, pollWrite, screeningPatch, screeningWrite, validateObject, voteCodeGenerate } from "../api/schema";
+import { votingMode, votingOpen } from "../voting";
 
 type Media = Env["MEDIA"] & {
   delete(keys: string | string[]): Promise<void>;
@@ -43,6 +44,7 @@ export async function handleAdmin(request: Request, env: Env, parts: string[]) {
     case "getVoteCodes": return listCodes(env, params.slug);
     case "generateVoteCodes": return generateCodes(request, env, params.slug);
     case "deleteVoteCodes": return deleteUnusedCodes(env, params.slug);
+    case "resetVoting": return resetVoting(env, params.slug);
     default: return error(500, "This admin route is not implemented.");
   }
 }
@@ -408,19 +410,32 @@ async function screeningResults(env: Env, slug: string) {
   const ballots = await env.DB.prepare(`${counted} SELECT COUNT(DISTINCT code_hash) AS ballots FROM counted`).bind(found.row.id).first<{ ballots: number }>();
   const listed = await env.DB.prepare(`${counted}
     SELECT p.id AS poll_id, p.slug AS poll_slug, p.title AS poll_title,
+      p.voting AS voting, p.start_at AS start_at, p.stop_at AS stop_at,
       o.id AS option_id, o.title AS option_title, COUNT(c.code_hash) AS votes
     FROM polls p
     LEFT JOIN options o ON o.poll_id = p.id
     LEFT JOIN votes v ON v.option_id = o.id
     LEFT JOIN counted c ON c.poll_id = v.poll_id AND c.code_hash = v.code_hash
     WHERE p.screening_id = ?
-    GROUP BY p.id, p.slug, p.title, p.sort_order, o.id, o.title, o.sort_order
+    GROUP BY p.id, p.slug, p.title, p.voting, p.start_at, p.stop_at, p.sort_order, o.id, o.title, o.sort_order
     ORDER BY p.sort_order, p.title, COUNT(c.code_hash) DESC, o.sort_order, o.title`).bind(found.row.id, found.row.id).all<ResultRow>();
-  const polls: { id: string; slug: string; title: string; votes: number; options: { id: string; title: string; votes: number }[] }[] = [];
+  const polls: { id: string; slug: string; title: string; votes: number; voting: "scheduled" | "open" | "closed"; votingOpen: boolean; startAt: string; stopAt: string; options: { id: string; title: string; votes: number }[] }[] = [];
   for (const row of listed.results || []) {
     let poll = polls.find((item) => item.id === row.poll_id);
     if (!poll) {
-      poll = { id: row.poll_id, slug: row.poll_slug, title: row.poll_title, votes: 0, options: [] };
+      const startAt = row.start_at || "";
+      const stopAt = row.stop_at || "";
+      poll = {
+        id: row.poll_id,
+        slug: row.poll_slug,
+        title: row.poll_title,
+        votes: 0,
+        voting: votingMode(row.voting),
+        votingOpen: Boolean(startAt && stopAt && votingOpen(row.voting, startAt, stopAt)),
+        startAt,
+        stopAt,
+        options: [],
+      };
       polls.push(poll);
     }
     if (!row.option_id || !row.option_title) continue;
@@ -428,10 +443,10 @@ async function screeningResults(env: Env, slug: string) {
     poll.votes += votes;
     poll.options.push({ id: row.option_id, title: row.option_title, votes });
   }
-  return json({ slug: found.row.slug, title: found.row.title, ballots: Number(ballots?.ballots || 0), polls });
+  return json({ now: new Date().toISOString(), slug: found.row.slug, title: found.row.title, ballots: Number(ballots?.ballots || 0), polls });
 }
 
-type ResultRow = { poll_id: string; poll_slug: string; poll_title: string; option_id: string | null; option_title: string | null; votes: number };
+type ResultRow = { poll_id: string; poll_slug: string; poll_title: string; voting: string | null; start_at: string | null; stop_at: string | null; option_id: string | null; option_title: string | null; votes: number };
 
 async function listCodes(env: Env, slug: string) {
   const found = await requireScreening(env, slug);
@@ -470,6 +485,19 @@ async function generateCodes(request: Request, env: Env, slug: string) {
   }
   const summary = await codeList(env, found.row.id);
   return json({ created: pending.map((item) => item.code), total: summary.total, used: summary.used, unused: summary.unused });
+}
+
+async function resetVoting(env: Env, slug: string) {
+  const found = await requireScreening(env, slug);
+  if ("response" in found) return found.response;
+  const id = found.row.id;
+  const votes = await env.DB.prepare("SELECT COUNT(*) AS total FROM votes WHERE screening_id = ?").bind(id).first<{ total: number }>();
+  const codes = await env.DB.prepare("SELECT COUNT(*) AS total FROM vote_codes WHERE screening_id = ?").bind(id).first<{ total: number }>();
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM votes WHERE screening_id = ?").bind(id),
+    env.DB.prepare("DELETE FROM vote_codes WHERE screening_id = ?").bind(id),
+  ]);
+  return json({ votes: Number(votes?.total || 0), codes: Number(codes?.total || 0) });
 }
 
 async function deleteUnusedCodes(env: Env, slug: string) {

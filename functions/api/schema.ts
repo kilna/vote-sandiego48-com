@@ -313,7 +313,7 @@ export const adminRoutes: AdminRoute[] = [
   { method: "GET", parts: ["screenings", ":slug"], operationId: "getScreening", summary: "Read a screening", description: "Returns the screening with its polls and options.", response: "Screening", status: 200 },
   { method: "PATCH", parts: ["screenings", ":slug"], operationId: "updateScreening", summary: "Update a screening", description: "Changes only the fields you send. Set bannerImageKey to a key from uploadScreeningImage, or null to remove the banner. Voting is controlled on each poll.", body: "ScreeningPatch", response: "Screening", status: 200 },
   { method: "DELETE", parts: ["screenings", ":slug"], operationId: "deleteScreening", summary: "Delete a screening", description: "Deletes the screening, its polls, options, vote codes, and votes, then deletes images stored for that screening.", response: "Deleted", status: 200 },
-  { method: "GET", parts: ["screenings", ":slug", "results"], operationId: "getScreeningResults", summary: "Read vote results", description: "Totals selections for each option. A vote code counts for a poll only when its saved pick count is between that poll's minSelections and maxSelections. Polls stay in ballot order. Options within a poll are ordered by vote count, then ballot order. ballots is the number of distinct vote codes that count for at least one poll. A poll's votes can exceed ballots when that poll allows more than one selection. Options with no votes are included.", response: "ScreeningResults", status: 200 },
+  { method: "GET", parts: ["screenings", ":slug", "results"], operationId: "getScreeningResults", summary: "Read vote results", description: "Totals selections for each option. A vote code counts for a poll only when its saved pick count is between that poll's minSelections and maxSelections. Polls stay in ballot order. Options within a poll are ordered by vote count, then ballot order. ballots is the number of distinct vote codes that count for at least one poll. A poll's votes can exceed ballots when that poll allows more than one selection. Options with no votes are included. now is the server time. Each poll includes its voting window. The results page requests this about every 3 seconds while it is open.", response: "ScreeningResults", status: 200 },
   { method: "GET", parts: ["screenings", ":slug", "polls"], operationId: "listPolls", summary: "List polls", description: "Polls are ordered by sortOrder, then title. Each poll includes its options.", response: "PollList", status: 200 },
   { method: "POST", parts: ["screenings", ":slug", "polls"], operationId: "createPoll", summary: "Create a poll", description: "Add a poll to a screening. A duplicate poll slug within the screening returns 409.", body: "PollWrite", response: "Poll", status: 201 },
   { method: "GET", parts: ["screenings", ":slug", "polls", ":pollSlug"], operationId: "getPoll", summary: "Read a poll", description: "Returns one poll and its options.", response: "Poll", status: 200 },
@@ -328,6 +328,7 @@ export const adminRoutes: AdminRoute[] = [
   { method: "GET", parts: ["screenings", ":slug", "codes"], operationId: "getVoteCodes", summary: "List vote codes", description: "Returns every code whose text was stored, in code order, plus counts. used on a code is true after that code has saved a pick. The same code can change polls that are still open. unlisted counts older rows that still work but have no saved text, so they are omitted from codes. Each code's public entry URL is https://vote.sandiego48.com/c/{code}.", response: "CodeList", status: 200 },
   { method: "POST", parts: ["screenings", ":slug", "codes"], operationId: "generateVoteCodes", summary: "Generate vote codes", description: "Creates count new codes and returns them in created. A code is unique across the site. The text is stored for download. Voting compares a SHA-256 hash, and spaces and hyphens in what the voter types are ignored.", body: "VoteCodeGenerate", response: "CodeGenerateResult", status: 200 },
   { method: "DELETE", parts: ["screenings", ":slug", "codes"], operationId: "deleteVoteCodes", summary: "Delete unused vote codes", description: "Removes every unused code for this screening. Send no body. Used codes stay, and votes are not deleted. deleted is how many rows were removed.", response: "CodeDeleteResult", status: 200 },
+  { method: "POST", parts: ["screenings", ":slug", "reset"], operationId: "resetVoting", summary: "Reset voting", description: "Deletes every vote and every vote code for this screening. Polls, options, images, and the voting schedule stay. Send no body. codes is how many vote codes were removed. votes is how many stored picks were removed.", response: "VotingReset", status: 200 },
 ];
 
 export function adminPath(route: AdminRoute) {
@@ -536,8 +537,9 @@ export function openapiDocument() {
         ImageCreated: resourceSchema(["key", "contentType", "url", "links"]),
         ScreeningResults: {
           type: "object",
-          required: ["slug", "title", "ballots", "polls"],
+          required: ["now", "slug", "title", "ballots", "polls"],
           properties: {
+            now: { type: "string", format: "date-time", description: "Server time when these totals were read." },
             slug: { type: "string" },
             title: { type: "string" },
             ballots: { type: "integer", description: "Distinct vote codes whose saved picks fall inside minSelections and maxSelections for at least one poll." },
@@ -546,12 +548,16 @@ export function openapiDocument() {
         },
         PollResults: {
           type: "object",
-          required: ["id", "slug", "title", "votes", "options"],
+          required: ["id", "slug", "title", "votes", "voting", "votingOpen", "startAt", "stopAt", "options"],
           properties: {
             id: { type: "string" },
             slug: { type: "string" },
             title: { type: "string" },
             votes: { type: "integer", description: "Selections in this poll from ballots inside its minimum and maximum." },
+            voting: { type: "string", enum: ["scheduled", "open", "closed"] },
+            votingOpen: { type: "boolean", description: "Whether a pick saved at this response would be stored." },
+            startAt: { type: "string", format: "date-time" },
+            stopAt: { type: "string", format: "date-time" },
             options: { type: "array", items: { $ref: "#/components/schemas/OptionResults" } },
           },
         },
@@ -599,6 +605,14 @@ export function openapiDocument() {
           properties: {
             deleted: { type: "integer", description: "Unused codes removed." },
             used: { type: "integer", description: "Used codes left in place." },
+          },
+        },
+        VotingReset: {
+          type: "object",
+          required: ["codes", "votes"],
+          properties: {
+            codes: { type: "integer", description: "Vote codes removed, used and unused." },
+            votes: { type: "integer", description: "Stored picks removed." },
           },
         },
         Deleted: { type: "object", required: ["deleted"], properties: { deleted: { type: "boolean" }, slug: { type: "string" }, id: { type: "string" } } },

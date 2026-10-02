@@ -1,4 +1,5 @@
-import { stopInMinutes } from "../functions/voting";
+import { startClock } from "./countdown";
+import { nextVotingCue, stopInMinutes, votingOpen } from "../functions/voting";
 import { voteCodeUrl } from "./vote-link";
 
 type ImageConfig = { aspectRatio: string; cycle?: number };
@@ -21,7 +22,9 @@ type Screening = {
 type Summary = Omit<Screening, "polls" | "links"> & { links: { ballot: string } };
 type VoteCode = { code: string; used: boolean };
 type CodeList = { total: number; used: number; unused: number; unlisted: number; codes: VoteCode[] };
-type ScreeningResults = { slug: string; title: string; ballots: number; polls: { id: string; slug: string; title: string; votes: number; options: { id: string; title: string; votes: number }[] }[] };
+type ResultOption = { id: string; title: string; votes: number };
+type ResultPoll = { id: string; slug: string; title: string; votes: number; voting: Voting; votingOpen: boolean; startAt: string; stopAt: string; options: ResultOption[] };
+type ScreeningResults = { now: string; slug: string; title: string; ballots: number; polls: ResultPoll[] };
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 const noticeKey = "sd48-admin-notice";
@@ -29,6 +32,13 @@ const imageAccept = "image/jpeg,image/png,image/webp,image/gif,image/svg+xml";
 let message = "";
 let messageError = false;
 let generation = 0;
+let resultsTimer = 0;
+let resultsWatch = 0;
+let resultsSkew = 0;
+let latestResults: ScreeningResults | null = null;
+const resultClocks = new Map<string, () => void>();
+const resultClockKeys = new Map<string, string>();
+const resultsEveryMs = 3000;
 
 class ApiError extends Error {
   status: number;
@@ -90,8 +100,20 @@ function fail(err: unknown) {
   showMessage(err instanceof Error ? err.message : "Something went wrong.", true);
 }
 
+function stopResultsLive() {
+  window.clearInterval(resultsTimer);
+  window.clearInterval(resultsWatch);
+  resultsTimer = 0;
+  resultsWatch = 0;
+  latestResults = null;
+  for (const stop of resultClocks.values()) stop();
+  resultClocks.clear();
+  resultClockKeys.clear();
+}
+
 async function render() {
   const gen = ++generation;
+  stopResultsLive();
   const path = location.pathname.replace(/\/$/, "") || "/admin";
   try {
     if (path === "/admin") await listScreen(gen);
@@ -175,22 +197,172 @@ async function removeScreening(slug: string) {
 
 async function resultsScreen(gen: number, slug: string) {
   paint(shell("Results", "<p>Loading…</p>"));
-  const data = await api<ScreeningResults>(`/api/admin/screenings/${encodeURIComponent(slug)}/results`);
+  const data = await api<ScreeningResults>(resultsPath(slug));
   if (gen !== generation) return;
+  latestResults = data;
+  noteResultsSkew(data.now);
   paint(shell(data.title, resultsBody(data)));
+  syncResultClocks();
+  startResultsLive(gen, slug);
+}
+
+function resultsPath(slug: string) {
+  return `/api/admin/screenings/${encodeURIComponent(slug)}/results`;
+}
+
+function ballotLabel(count: number) {
+  return `${count} ${count === 1 ? "ballot" : "ballots"}`;
+}
+
+function voteLabel(count: number) {
+  return `${count} ${count === 1 ? "vote" : "votes"}`;
 }
 
 function resultsBody(data: ScreeningResults) {
-  const polls = data.polls.map((poll) => {
-    const options = poll.options.length ? poll.options.map((option) => {
-      const share = poll.votes ? (option.votes / poll.votes) * 100 : 0;
-      return `<div class="result-row"><div class="result-label"><span>${esc(option.title)}</span><span>${option.votes} · ${Math.round(share)}%</span></div><div class="result-track" aria-hidden="true"><span class="result-fill" style="width:${share}%"></span></div></div>`;
-    }).join("") : `<p class="help">No options yet.</p>`;
-    const votes = `${poll.votes} ${poll.votes === 1 ? "vote" : "votes"}`;
-    return `<section class="editor"><h2>${esc(poll.title)}</h2><p>${votes}</p>${options}</section>`;
-  }).join("") || "<p>No polls yet.</p>";
-  const ballots = `${data.ballots} ${data.ballots === 1 ? "ballot" : "ballots"}`;
-  return `<p><a href="/admin/screenings/${encodeURIComponent(data.slug)}">Edit screening</a></p><p>${ballots}</p>${polls}`;
+  const polls = data.polls.map(resultPoll).join("") || "<p>No polls yet.</p>";
+  return `<p><a href="/admin/screenings/${encodeURIComponent(data.slug)}">Edit screening</a></p><p data-result-ballots>${ballotLabel(data.ballots)}</p><div id="results">${polls}</div>`;
+}
+
+function resultPoll(poll: ResultPoll) {
+  const options = poll.options.length ? `<div data-result-options>${poll.options.map((option) => resultOption(poll, option)).join("")}</div>` : `<p class="help">No options yet.</p>`;
+  return `<section class="editor result-poll" data-result-poll="${esc(poll.id)}"><h2>${esc(poll.title)}</h2><div class="countdown" data-countdown="${esc(poll.id)}" hidden><span class="countdown-prefix"></span><span class="countdown-clock"></span></div><p class="window" data-window="${esc(poll.id)}" hidden></p><p data-result-total>${voteLabel(poll.votes)}</p>${options}</section>`;
+}
+
+function resultOption(poll: ResultPoll, option: ResultOption) {
+  const share = poll.votes ? (option.votes / poll.votes) * 100 : 0;
+  return `<div class="result-row" data-result-option="${esc(option.id)}"><div class="result-label"><span>${esc(option.title)}</span><span data-result-count>${option.votes} · ${Math.round(share)}%</span></div><div class="result-track" aria-hidden="true"><span class="result-fill" style="width:${share}%"></span></div></div>`;
+}
+
+function resultShape(data: ScreeningResults) {
+  return data.polls.map((poll) => `${poll.id}:${poll.options.map((option) => option.id).sort().join(",")}`).join("|");
+}
+
+function applyResults(data: ScreeningResults) {
+  latestResults = data;
+  noteResultsSkew(data.now);
+  const root = document.querySelector<HTMLElement>("#results");
+  const ballots = document.querySelector<HTMLElement>("[data-result-ballots]");
+  if (!root || !ballots || resultShape(data) !== resultNodesShape()) {
+    if (root) {
+      for (const stop of resultClocks.values()) stop();
+      resultClocks.clear();
+      resultClockKeys.clear();
+      root.innerHTML = data.polls.map(resultPoll).join("") || "<p>No polls yet.</p>";
+    }
+  } else {
+    ballots.textContent = ballotLabel(data.ballots);
+    for (const poll of data.polls) {
+      const section = document.querySelector<HTMLElement>(`[data-result-poll="${CSS.escape(poll.id)}"]`);
+      const total = section?.querySelector<HTMLElement>("[data-result-total]");
+      const list = section?.querySelector<HTMLElement>("[data-result-options]");
+      if (total) total.textContent = voteLabel(poll.votes);
+      if (!list) continue;
+      for (const option of poll.options) {
+        const row = list.querySelector<HTMLElement>(`[data-result-option="${CSS.escape(option.id)}"]`);
+        if (!row) continue;
+        list.appendChild(row);
+        const share = poll.votes ? (option.votes / poll.votes) * 100 : 0;
+        const count = row.querySelector<HTMLElement>("[data-result-count]");
+        const fill = row.querySelector<HTMLElement>(".result-fill");
+        if (count) count.textContent = `${option.votes} · ${Math.round(share)}%`;
+        if (fill) fill.style.width = `${share}%`;
+      }
+    }
+  }
+  if (ballots) ballots.textContent = ballotLabel(data.ballots);
+  syncResultClocks();
+}
+
+function resultNodesShape() {
+  const sections = Array.from(document.querySelectorAll<HTMLElement>("[data-result-poll]"));
+  return sections.map((section) => {
+    const id = section.dataset.resultPoll || "";
+    const options = Array.from(section.querySelectorAll<HTMLElement>("[data-result-option]")).map((row) => row.dataset.resultOption || "").sort().join(",");
+    return `${id}:${options}`;
+  }).join("|");
+}
+
+function noteResultsSkew(now: string) {
+  const stamp = Date.parse(now);
+  if (Number.isFinite(stamp)) resultsSkew = stamp - Date.now();
+}
+
+function resultsNow() {
+  return Date.now() + resultsSkew;
+}
+
+function freshenResultPoll(poll: ResultPoll) {
+  if (poll.voting === "open") poll.votingOpen = true;
+  else if (poll.voting === "closed") poll.votingOpen = false;
+  else poll.votingOpen = votingOpen(poll.voting, poll.startAt, poll.stopAt, resultsNow());
+}
+
+function formatResultTime(iso: string) {
+  const at = Date.parse(iso);
+  if (!Number.isFinite(at)) return "";
+  return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(at));
+}
+
+function syncResultClocks() {
+  const data = latestResults;
+  if (!data) return;
+  const now = resultsNow();
+  for (const poll of data.polls) {
+    freshenResultPoll(poll);
+    const cue = nextVotingCue([poll], now);
+    const box = document.querySelector<HTMLElement>(`[data-countdown="${CSS.escape(poll.id)}"]`);
+    const windowEl = document.querySelector<HTMLElement>(`[data-window="${CSS.escape(poll.id)}"]`);
+    if (!box) continue;
+    const showClock = Boolean(cue);
+    if (!showClock) {
+      box.hidden = true;
+      resultClocks.get(poll.id)?.();
+      resultClocks.delete(poll.id);
+      resultClockKeys.delete(poll.id);
+      if (windowEl) {
+        windowEl.hidden = false;
+        windowEl.className = poll.votingOpen ? "window" : "window closed";
+        const when = formatResultTime(poll.stopAt);
+        if (poll.voting === "closed" || !poll.votingOpen) windowEl.textContent = poll.voting === "scheduled" && Date.parse(poll.startAt) > now ? "Voting isn't open yet" : "Voting is closed";
+        else if (poll.voting === "scheduled" && when) windowEl.textContent = `Voting ends at ${when}`;
+        else windowEl.textContent = "Voting is open";
+      }
+      continue;
+    }
+    if (windowEl) windowEl.hidden = true;
+    box.hidden = false;
+    const label = box.querySelector<HTMLElement>(".countdown-prefix");
+    if (label) label.textContent = cue && cue.kind === "end" ? "Voting ends in" : "Voting starts in";
+    const key = cue ? `${cue.kind}:${cue.at}` : "";
+    if (resultClockKeys.get(poll.id) === key) continue;
+    resultClockKeys.set(poll.id, key);
+    resultClocks.get(poll.id)?.();
+    const clock = box.querySelector<HTMLElement>(".countdown-clock");
+    if (clock && cue) resultClocks.set(poll.id, startClock(clock, cue.at, resultsNow));
+  }
+}
+
+function startResultsLive(gen: number, slug: string) {
+  window.clearInterval(resultsTimer);
+  window.clearInterval(resultsWatch);
+  resultsWatch = window.setInterval(() => {
+    if (gen !== generation) return;
+    syncResultClocks();
+  }, 250);
+  resultsTimer = window.setInterval(() => {
+    if (gen !== generation || document.visibilityState !== "visible") return;
+    void refreshResults(gen, slug);
+  }, resultsEveryMs);
+}
+
+async function refreshResults(gen: number, slug: string) {
+  try {
+    const data = await api<ScreeningResults>(resultsPath(slug));
+    if (gen !== generation) return;
+    applyResults(data);
+  } catch {
+    /* The next poll retries. */
+  }
 }
 
 function newScreen() {
@@ -292,7 +464,7 @@ function editBody(screening: Screening, counts: CodeList) {
     <h2 class="section-title">Polls</h2>${polls}
     ${hasPolls ? revealButton("new-poll", "Add poll") : ""}
     ${newPollForm(screening, !hasPolls)}
-    <section class="editor codes-sheet"><h2>Vote codes</h2><p>${counts.total} total · ${counts.unused} unused · ${counts.used} used</p><p class="help">Each code's URL is https://vote.sandiego48.com/c/CODE, which enters that code. A code can update any poll that is still open. The download lists every code, whether it has been used, and its URL. Typing ignores spaces and hyphens.</p>${counts.unlisted ? `<p class="help">${counts.unlisted} older ${counts.unlisted === 1 ? "code was" : "codes were"} saved before downloads existed. ${counts.unlisted === 1 ? "It still works" : "They still work"} and ${counts.unlisted === 1 ? "is" : "are"} not in the file.</p>` : ""}<form id="codes-form"><label class="codes-count">How many<input name="count" type="number" min="1" max="500" required></label><div class="admin-actions"><button class="button primary" type="submit">Generate codes</button><button class="button secondary" type="button" id="download-codes">Download codes</button>${counts.unused ? `<button class="button danger" type="button" id="remove-codes">Remove unused codes</button>` : ""}</div></form></section>`;
+    <section class="editor codes-sheet"><h2>Vote codes</h2><p>${counts.total} total · ${counts.unused} unused · ${counts.used} used</p><p class="help">Each code's URL is https://vote.sandiego48.com/c/CODE, which enters that code. A code can update any poll that is still open. The download lists every code, whether it has been used, and its URL. Typing ignores spaces and hyphens.</p><p class="help">Reset voting deletes every code and every cast vote. Polls, films, and images stay.</p>${counts.unlisted ? `<p class="help">${counts.unlisted} older ${counts.unlisted === 1 ? "code was" : "codes were"} saved before downloads existed. ${counts.unlisted === 1 ? "It still works" : "They still work"} and ${counts.unlisted === 1 ? "is" : "are"} not in the file.</p>` : ""}<form id="codes-form"><label class="codes-count">How many<input name="count" type="number" min="1" max="500" required></label><div class="admin-actions"><button class="button primary" type="submit">Generate codes</button><button class="button secondary" type="button" id="download-codes">Download codes</button>${counts.unused ? `<button class="button danger" type="button" id="remove-codes">Remove unused codes</button>` : ""}<button class="button danger" type="button" id="reset-voting">Reset voting</button></div></form></section>`;
 }
 
 function pollBlock(screening: Screening, poll: Poll) {
@@ -532,6 +704,7 @@ function bindCodes(screening: Screening) {
   });
   document.querySelector("#download-codes")!.addEventListener("click", () => void downloadCodes(screening));
   document.querySelector("#remove-codes")?.addEventListener("click", () => void removeUnusedCodes(screening));
+  document.querySelector("#reset-voting")!.addEventListener("click", () => void resetVoting(screening));
 }
 
 function clampMinutes(value: string) {
@@ -563,6 +736,17 @@ async function removeUnusedCodes(screening: Screening) {
   try {
     const result = await api<{ deleted: number }>(`/api/admin/screenings/${encodeURIComponent(screening.slug)}/codes`, { method: "DELETE" });
     note(`Removed ${result.deleted} unused codes.`);
+    await render();
+  } catch (err) { fail(err); }
+}
+
+async function resetVoting(screening: Screening) {
+  if (!confirm(`Reset voting for ${screening.title}? This deletes every vote code and every cast vote. Polls, films, and images stay.`)) return;
+  try {
+    const result = await api<{ codes: number; votes: number }>(`/api/admin/screenings/${encodeURIComponent(screening.slug)}/reset`, { method: "POST" });
+    const codes = `${result.codes} ${result.codes === 1 ? "code" : "codes"}`;
+    const votes = `${result.votes} ${result.votes === 1 ? "vote" : "votes"}`;
+    note(`Reset voting. Removed ${codes} and ${votes}.`);
     await render();
   } catch (err) { fail(err); }
 }

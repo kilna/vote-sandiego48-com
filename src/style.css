@@ -210,7 +210,7 @@ main.home .gate {
 .poll-heading {
   display: flex;
   width: 100%;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
   margin: 0;
@@ -233,12 +233,17 @@ main.home .gate {
 
 .rule {
   flex: none;
-  padding: 0.2rem 0.7rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: calc(clamp(1.61rem, 4.125vw, 2.36rem) * 1.05);
+  padding: 0 0.9rem;
   border-radius: 999px;
   background: var(--48-purple);
   color: var(--48-white);
-  font-size: 0.78rem;
+  font-size: clamp(1rem, 2.5vw, 1.25rem);
   font-weight: 700;
+  line-height: 1;
   letter-spacing: 0.03em;
   text-shadow: none;
 }
@@ -480,8 +485,8 @@ input:not([type="radio"]):not([type="checkbox"]):focus-visible {
 
 .poll-pin .pick-status {
   display: block;
-  width: fit-content;
-  max-width: 100%;
+  align-self: stretch;
+  width: auto;
   margin: 0;
   padding: 0.35rem 0.7rem;
   border-radius: 0.45rem;
@@ -777,35 +782,41 @@ input:not([type="radio"]):not([type="checkbox"]):focus-visible {
   font-display: swap;
 }
 
-.poll .countdown {
+.poll .countdown,
+.result-poll .countdown {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.1rem;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.7rem;
   width: 100%;
   margin: 0.45rem 0 0.2rem;
-  padding: 0.4rem 0.65rem 0.5rem;
+  padding: 0.45rem 0.75rem 0.5rem;
   border-radius: 0.45rem;
   background: radial-gradient(ellipse at bottom, var(--48-purple-dark) 0%, var(--48-black) 100%);
   color: var(--48-orange);
   font-weight: 800;
   text-align: left;
-  line-height: 1.05;
-  font-size: clamp(1.05rem, 3.4vw, 1.3rem);
+  line-height: 1;
+  font-size: clamp(1.35rem, 4.4vw, 1.7rem);
   --clock-color: var(--48-gold);
 }
 
-.poll .countdown-prefix {
+.poll .countdown-prefix,
+.result-poll .countdown-prefix {
   display: block;
-  max-width: 100%;
 }
 
-.poll .countdown .clock {
-  font-size: clamp(1.7rem, 7vw, 2.5rem);
+.poll .countdown .clock,
+.result-poll .countdown .clock {
+  font-size: 1.15em;
   transform: none;
 }
 
-.poll .countdown[hidden] { display: none; }
+.poll .countdown[hidden],
+.result-poll .countdown[hidden] { display: none; }
+
+.result-poll .window { margin: 0.45rem 0 0.2rem; }
 
 .clock {
   font-family: "DSEG7Classic", monospace;

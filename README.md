@@ -45,7 +45,7 @@ People administer the site through Cloudflare Access. Agents send `CF-Access-Cli
 
 Images are jpeg, png, webp, gif, or svg, up to 8 MiB. Uploading the same filename replaces the object. Asset responses are cached for one hour. Removing an image from an option, or deleting a poll or option, leaves the stored object. Deleting a screening deletes its stored images.
 
-`/admin` edits screenings, polls, options, the banner, and stills after Cloudflare Access signs the browser in. Each poll has its own start, stop, schedule, and a control to stop voting in a number of minutes. Each screening on that page links to its results, which total selections per option. Its vote-code section generates codes and downloads them as a CSV that includes each code's URL, `https://vote.sandiego48.com/c/<code>`.
+`/admin` edits screenings, polls, options, the banner, and stills after Cloudflare Access signs the browser in. Each poll has its own start, stop, schedule, and a control to stop voting in a number of minutes. Each screening on that page links to its results, which total selections per option. That page refreshes about every 3 seconds and shows each poll's countdown. Its vote-code section generates codes and downloads them as a CSV that includes each code's URL, `https://vote.sandiego48.com/c/<code>`. Reset voting on that page deletes every code and every cast vote and leaves the polls, films, and images.
 
 ## Admin access
 
@@ -58,7 +58,6 @@ Unauthenticated requests to `https://vote.sandiego48.com/api/admin` are challeng
 ## Not implemented yet
 
 - The Access service token named in `AGENTS.md`, if it is not already on the Access application. The admin Functions already verify the Access JWT.
-- Atomic vote-code consumption. Overlapping saves of the same code can both record votes.
 - Checks that uploads match `imageConfig.aspectRatio`.
 - Rate limiting on public vote saves.
 - Tests against a local D1 and R2, including concurrent use of one code.
