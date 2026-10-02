@@ -5,7 +5,7 @@ import type { Env } from "../types";
 import { error, json } from "../api/http";
 import { imageContentType, imageKey, keyBelongs, MAX_IMAGE_BYTES, safeFilename } from "./images";
 import { presentOption, presentPoll, presentScreening, presentScreeningSummary, type OptionRow, type PollRow, type ScreeningRow } from "./present";
-import { adminIndex, matchAdminRoute, optionPatch, optionWrite, pollPatch, pollWrite, screeningPatch, screeningWrite, validateObject, voteCodeGenerate } from "../api/schema";
+import { adminIndex, matchAdminRoute, optionOrder, optionPatch, optionWrite, pollOrder, pollPatch, pollWrite, screeningPatch, screeningWrite, validateObject, voteCodeGenerate } from "../api/schema";
 import { votingMode, votingOpen } from "../voting";
 
 type Media = Env["MEDIA"] & {
@@ -35,11 +35,13 @@ export async function handleAdmin(request: Request, env: Env, parts: string[]) {
     case "getPoll": return readPoll(env, params.slug, params.pollSlug);
     case "updatePoll": return updatePoll(request, env, params.slug, params.pollSlug);
     case "deletePoll": return deletePoll(env, params.slug, params.pollSlug);
+    case "reorderPolls": return reorderPolls(request, env, params.slug);
     case "listOptions": return listOptions(env, params.slug, params.pollSlug);
     case "createOption": return createOption(request, env, params.slug, params.pollSlug);
     case "getOption": return readOption(env, params.slug, params.pollSlug, params.optionId);
     case "updateOption": return updateOption(request, env, params.slug, params.pollSlug, params.optionId);
     case "deleteOption": return deleteOption(env, params.slug, params.pollSlug, params.optionId);
+    case "reorderOptions": return reorderOptions(request, env, params.slug, params.pollSlug);
     case "uploadScreeningImage": return uploadImage(request, env, params.slug);
     case "getVoteCodes": return listCodes(env, params.slug);
     case "generateVoteCodes": return generateCodes(request, env, params.slug);
@@ -285,6 +287,23 @@ async function updatePoll(request: Request, env: Env, slug: string, pollSlug: st
   return pollResponse(env, found.row, next.row);
 }
 
+async function reorderPolls(request: Request, env: Env, slug: string) {
+  const found = await requireScreening(env, slug);
+  if ("response" in found) return found.response;
+  const body = await readBody(request);
+  if ("response" in body) return body.response;
+  const parsed = validateObject(pollOrder, body.value, "create");
+  if (!parsed.ok) return invalid(parsed.fields);
+  const slugs = parsed.value.slugs as string[];
+  const rows = await env.DB.prepare("SELECT id, slug FROM polls WHERE screening_id = ?").bind(found.row.id).all<{ id: string; slug: string }>();
+  const ids = new Map(rows.results.map((row) => [row.slug, row.id]));
+  const mismatch = completeOrder(slugs, ids, "slugs", "List every poll on this screening exactly once.", (item) => `"${item}" is not a poll on this screening.`);
+  if (mismatch) return invalid(mismatch);
+  const statements = slugs.map((pollSlug, index) => env.DB.prepare("UPDATE polls SET sort_order = ? WHERE id = ?").bind(index, ids.get(pollSlug)));
+  if (statements.length) await env.DB.batch(statements);
+  return json({ polls: await pollsFor(env, found.row) });
+}
+
 async function deletePoll(env: Env, slug: string, pollSlug: string) {
   const found = await requireScreening(env, slug);
   if ("response" in found) return found.response;
@@ -356,6 +375,31 @@ async function updateOption(request: Request, env: Env, slug: string, pollSlug: 
   const option = await requireOption(env, located.poll.id, optionId);
   if ("response" in option) return option.response;
   return json(presentOption(option.row));
+}
+
+async function reorderOptions(request: Request, env: Env, slug: string, pollSlug: string) {
+  const found = await requireScreening(env, slug);
+  if ("response" in found) return found.response;
+  const poll = await requirePoll(env, found.row.id, pollSlug);
+  if ("response" in poll) return poll.response;
+  const body = await readBody(request);
+  if ("response" in body) return body.response;
+  const parsed = validateObject(optionOrder, body.value, "create");
+  if (!parsed.ok) return invalid(parsed.fields);
+  const optionIds = parsed.value.ids as string[];
+  const rows = await env.DB.prepare("SELECT id FROM options WHERE poll_id = ?").bind(poll.row.id).all<{ id: string }>();
+  const ids = new Map(rows.results.map((row) => [row.id, row.id]));
+  const mismatch = completeOrder(optionIds, ids, "ids", "List every option on this poll exactly once.", (item) => `"${item}" is not an option on this poll.`);
+  if (mismatch) return invalid(mismatch);
+  const statements = optionIds.map((optionId, index) => env.DB.prepare("UPDATE options SET sort_order = ? WHERE id = ?").bind(index, optionId));
+  if (statements.length) await env.DB.batch(statements);
+  return json({ options: await optionsFor(env, poll.row.id) });
+}
+
+function completeOrder(items: string[], ids: Map<string, string>, field: string, missing: string, unknown: (item: string) => string) {
+  for (const item of items) if (!ids.has(item)) return { [field]: unknown(item) };
+  if (items.length !== ids.size) return { [field]: missing };
+  return null;
 }
 
 async function deleteOption(env: Env, slug: string, pollSlug: string, optionId: string) {

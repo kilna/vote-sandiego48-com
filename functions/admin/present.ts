@@ -37,7 +37,7 @@ export type OptionRow = {
   sort_order: number;
 };
 
-export type ImageConfig = { aspectRatio: string; cycle: number };
+export type ImageConfig = { aspectRatio: string; cycle: number; zoomable: boolean };
 
 export const imageCycleMin = 1;
 export const imageCycleMax = 60;
@@ -60,12 +60,12 @@ export function parseImageConfig(raw: string | null): ImageConfig {
   try {
     const value = JSON.parse(raw || "{}") as Partial<ImageConfig> | null;
     if (value && typeof value === "object" && typeof value.aspectRatio === "string") {
-      return { aspectRatio: value.aspectRatio, cycle: imageCycleSeconds(value.cycle) };
+      return { aspectRatio: value.aspectRatio, cycle: imageCycleSeconds(value.cycle), zoomable: value.zoomable === true };
     }
   } catch {
     /* Fall through to the ballot default. */
   }
-  return { aspectRatio: "16:9", cycle: imageCycleDefault };
+  return { aspectRatio: "16:9", cycle: imageCycleDefault, zoomable: false };
 }
 
 export function presentOption(row: OptionRow) {

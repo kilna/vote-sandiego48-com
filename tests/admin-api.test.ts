@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { keyBelongs, safeFilename } from "../functions/admin/images";
 import { imageCycleSeconds, parseImageConfig, presentOption, presentPoll, presentScreening } from "../functions/admin/present";
 import { normalizeCode, randomCode } from "../functions/codes";
-import { adminIndex, adminPath, adminRoutes, examples, matchAdminRoute, openapiDocument, optionWrite, pollPatch, pollWrite, publicIndex, screeningPatch, screeningWrite, validateObject, voteCodeGenerate } from "../functions/api/schema";
+import { adminIndex, adminPath, adminRoutes, examples, matchAdminRoute, openapiDocument, optionOrder, optionWrite, pollOrder, pollPatch, pollWrite, publicIndex, screeningPatch, screeningWrite, validateObject, voteCodeGenerate } from "../functions/api/schema";
 import { countdownLabel, nextVotingCue, stopInMinutes, votingOpen } from "../functions/voting";
 
 describe("admin api contract", () => {
@@ -17,7 +17,8 @@ describe("admin api contract", () => {
   it("points agents at the OpenAPI document and the create workflow", () => {
     expect(publicIndex().links.openapi.href).toBe("/api/openapi.json");
     const ids = new Set(adminRoutes.map((route) => route.operationId));
-    for (const step of adminIndex().workflows.createScreening) expect(ids.has(step.operationId)).toBe(true);
+    const index = adminIndex();
+    for (const step of [...index.workflows.createScreening, ...index.workflows.reorder]) expect(ids.has(step.operationId)).toBe(true);
   });
 
   it("accepts the documented create examples", () => {
@@ -25,6 +26,8 @@ describe("admin api contract", () => {
     expect(validateObject(pollWrite, examples.pollCreate, "create").ok).toBe(true);
     expect(validateObject(optionWrite, examples.optionCreate, "create").ok).toBe(true);
     expect(validateObject(voteCodeGenerate, examples.codes, "create").ok).toBe(true);
+    expect(validateObject(pollOrder, examples.pollOrder, "create").ok).toBe(true);
+    expect(validateObject(optionOrder, examples.optionOrder, "create").ok).toBe(true);
   });
 
   it("names invalid fields", () => {
@@ -48,7 +51,11 @@ describe("admin api contract", () => {
     const cycle = validateObject(pollWrite, { ...examples.pollCreate, imageConfig: { aspectRatio: "16:9", cycle: true } }, "create");
     expect(cycle.ok).toBe(false);
     const timed = validateObject(pollWrite, { slug: "best-film", title: "Best Film", imageConfig: { aspectRatio: "16:9" } }, "create");
-    expect(timed.ok && timed.value.imageConfig).toEqual({ aspectRatio: "16:9", cycle: 2 });
+    expect(timed.ok && timed.value.imageConfig).toEqual({ aspectRatio: "16:9", cycle: 2, zoomable: false });
+    const zoomed = validateObject(pollWrite, { ...examples.pollCreate, imageConfig: { aspectRatio: "2:3", zoomable: true } }, "create");
+    expect(zoomed.ok && zoomed.value.imageConfig).toEqual({ aspectRatio: "2:3", cycle: 2, zoomable: true });
+    const zoomType = validateObject(pollWrite, { ...examples.pollCreate, imageConfig: { aspectRatio: "16:9", zoomable: "yes" } }, "create");
+    expect(zoomType.ok).toBe(false);
     const count = validateObject(voteCodeGenerate, { count: 0 }, "create");
     expect(count.ok).toBe(false);
     const voting = validateObject(pollPatch, { voting: "paused" }, "patch");
@@ -63,6 +70,11 @@ describe("admin api contract", () => {
     if (!windowOrder.ok) expect(windowOrder.fields.stopAt).toMatch(/after/);
     const pasted = validateObject(voteCodeGenerate, { codes: ["TEST-1001"] }, "create");
     expect(pasted.ok).toBe(false);
+    const duplicatePolls = validateObject(pollOrder, { slugs: ["best-film", "best-film"] }, "create");
+    expect(duplicatePolls.ok).toBe(false);
+    if (!duplicatePolls.ok) expect(duplicatePolls.fields.slugs).toMatch(/more than once/);
+    const duplicateOptions = validateObject(optionOrder, { ids: ["same", "same"] }, "create");
+    expect(duplicateOptions.ok).toBe(false);
   });
 
   it("matches admin routes and rejects unknown methods", () => {
@@ -72,15 +84,21 @@ describe("admin api contract", () => {
     expect(wrong.ok).toBe(false);
     if (!wrong.ok) expect(wrong.status).toBe(405);
     expect(matchAdminRoute("GET", ["missing"]).ok).toBe(false);
+    const reorderPolls = matchAdminRoute("PUT", ["screenings", "spring", "polls", "order"]);
+    expect(reorderPolls.ok && reorderPolls.operationId).toBe("reorderPolls");
+    const namedPoll = matchAdminRoute("PATCH", ["screenings", "spring", "polls", "order"]);
+    expect(namedPoll.ok && namedPoll.operationId).toBe("updatePoll");
+    const reorderOptions = matchAdminRoute("PUT", ["screenings", "spring", "polls", "best-film", "options", "order"]);
+    expect(reorderOptions.ok && reorderOptions.operationId).toBe("reorderOptions");
   });
 
   it("reads seconds per image and ignores stored still counts", () => {
     expect(imageCycleSeconds(true)).toBe(2);
     expect(imageCycleSeconds(0)).toBe(2);
     expect(imageCycleSeconds(1)).toBe(1);
-    expect(parseImageConfig(JSON.stringify({ aspectRatio: "2:3", min: 1, max: 4, cycle: true }))).toEqual({ aspectRatio: "2:3", cycle: 2 });
-    expect(parseImageConfig(JSON.stringify({ aspectRatio: "16:9", cycle: 5 }))).toEqual({ aspectRatio: "16:9", cycle: 5 });
-    expect(parseImageConfig("{}")).toEqual({ aspectRatio: "16:9", cycle: 2 });
+    expect(parseImageConfig(JSON.stringify({ aspectRatio: "2:3", min: 1, max: 4, cycle: true }))).toEqual({ aspectRatio: "2:3", cycle: 2, zoomable: false });
+    expect(parseImageConfig(JSON.stringify({ aspectRatio: "16:9", cycle: 5, zoomable: true }))).toEqual({ aspectRatio: "16:9", cycle: 5, zoomable: true });
+    expect(parseImageConfig("{}")).toEqual({ aspectRatio: "16:9", cycle: 2, zoomable: false });
   });
 
   it("keeps presenter fields in the OpenAPI schemas", () => {

@@ -2,7 +2,7 @@ import { startClock } from "./countdown";
 import { nextVotingCue, stopInMinutes, votingOpen } from "../functions/voting";
 import { voteCodeUrl } from "./vote-link";
 
-type ImageConfig = { aspectRatio: string; cycle?: number };
+type ImageConfig = { aspectRatio: string; cycle?: number; zoomable?: boolean };
 type Option = { id: string; title: string; description: string | null; imageKeys: string[]; images: string[]; sortOrder: number };
 type Voting = "scheduled" | "open" | "closed";
 type Poll = { id: string; slug: string; title: string; instructions: string | null; minSelections: number; maxSelections: number; imageConfig: ImageConfig; sortOrder: number; startAt: string; stopAt: string; voting: Voting; votingOpen: boolean; options: Option[] };
@@ -39,6 +39,12 @@ let latestResults: ScreeningResults | null = null;
 const resultClocks = new Map<string, () => void>();
 const resultClockKeys = new Map<string, string>();
 const resultsEveryMs = 3000;
+const saveDelayMs = 400;
+const openPolls = new Set<string>();
+const openOptions = new Set<string>();
+const saveTails = new Map<string, Promise<void>>();
+let expandPollId = "";
+let expandOptionId = "";
 
 class ApiError extends Error {
   status: number;
@@ -435,6 +441,11 @@ function bindScreeningForm(existing: Screening | null) {
 }
 
 async function editScreen(gen: number, slug: string) {
+  rememberSheets();
+  if (expandPollId) openPolls.add(expandPollId);
+  if (expandOptionId) openOptions.add(expandOptionId);
+  expandPollId = "";
+  expandOptionId = "";
   paint(shell("Screening", "<p>Loading…</p>"));
   const [screening, counts] = await Promise.all([
     api<Screening>(`/api/admin/screenings/${encodeURIComponent(slug)}`),
@@ -452,12 +463,14 @@ async function editScreen(gen: number, slug: string) {
   }
   bindNewPoll(screening);
   bindReveals();
+  bindSheets();
+  bindPollDrag(screening);
   bindCodes(screening);
 }
 
 function editBody(screening: Screening, counts: CodeList) {
   const hasPolls = screening.polls.length > 0;
-  const polls = hasPolls ? screening.polls.map((poll) => pollBlock(screening, poll)).join("") : "<p>No polls yet.</p>";
+  const polls = hasPolls ? `<div id="poll-list" class="sheet-list">${screening.polls.map((poll) => pollBlock(screening, poll)).join("")}</div>` : "<p>No polls yet.</p>";
   return `<p><a href="${esc(screening.links.ballot)}">Ballot page</a> · <a href="/api/screenings/${encodeURIComponent(screening.slug)}">Public JSON</a></p>
     <form id="screening-form" class="editor"><h2>Screening</h2>${screeningFields(screening)}<div class="admin-actions"><button class="button primary" type="submit">Save screening</button><button class="button danger" type="button" id="delete-screening">Delete screening</button></div></form>
     <section class="editor" id="banner-section"><h2>Banner</h2>${screening.bannerImage ? `<img class="banner-preview" alt="" src="${esc(screening.bannerImage)}">` : "<p>No banner yet.</p>"}<label>Image file<input id="banner-file" type="file" accept="${imageAccept}"></label><div class="admin-actions"><button class="button secondary" type="button" id="upload-banner">Upload banner</button>${screening.bannerImageKey ? `<button class="button danger" type="button" id="clear-banner">Remove banner</button>` : ""}</div><p class="help">Filenames use letters, numbers, dots, hyphens, and underscores. Uploading the same name replaces that file.</p></section>
@@ -469,11 +482,21 @@ function editBody(screening: Screening, counts: CodeList) {
 
 function pollBlock(screening: Screening, poll: Poll) {
   const hasOptions = poll.options.length > 0;
-  const options = poll.options.map((option) => optionForm(poll, option)).join("");
+  const options = poll.options.map((option) => optionSheet(poll, option)).join("");
   const empty = hasOptions ? "" : `<p class="help">No options yet.</p>`;
   const formId = `new-option-${poll.id}`;
   const toggle = hasOptions ? revealButton(formId, "Add option") : "";
-  return `<article class="editor poll-block"><form id="poll-${poll.id}" class="poll-form"><h2>${esc(poll.title)}</h2>${pollFields(screening, poll)}<div class="admin-actions"><button class="button primary" type="submit">Save poll</button><button class="button danger" type="button" data-delete-poll="${esc(poll.slug)}">Delete poll</button></div></form>${pollVoting(poll)}<section class="poll-options"><h3>Options</h3>${empty}${options}${toggle}${optionForm(poll, null, !hasOptions)}</section></article>`;
+  const panelId = `poll-panel-${poll.id}`;
+  return `<article class="editor poll-block" data-poll-id="${esc(poll.id)}">${sheetBar(`Drag ${poll.title}`, poll.title, panelId)}<div class="sheet-panel" id="${esc(panelId)}" hidden><form id="poll-${poll.id}" class="poll-form">${pollFields(screening, poll)}<div class="admin-actions"><button class="button danger" type="button" data-delete-poll="${esc(poll.slug)}">Delete poll</button></div></form>${pollVoting(poll)}<section class="poll-options"><h3>Options</h3>${empty}<div class="option-list sheet-list">${options}</div>${toggle}${optionForm(poll, null, !hasOptions)}</section></div></article>`;
+}
+
+function optionSheet(poll: Poll, option: Option) {
+  const panelId = `option-panel-${option.id}`;
+  return `<article class="option-sheet" data-option-id="${esc(option.id)}">${sheetBar(`Drag ${option.title}`, option.title, panelId)}<div class="sheet-panel" id="${esc(panelId)}" hidden>${optionForm(poll, option)}</div></article>`;
+}
+
+function sheetBar(label: string, title: string, panelId: string) {
+  return `<div class="sheet-bar"><button type="button" class="drag" aria-label="${esc(label)}"><span class="grip" aria-hidden="true"></span></button><button type="button" class="sheet-toggle" aria-expanded="false" aria-controls="${esc(panelId)}"><span class="sheet-name">${esc(title)}</span></button></div>`;
 }
 
 function newPollForm(screening: Screening, open: boolean) {
@@ -492,13 +515,18 @@ function pollFields(screening: Screening, poll: Poll | null) {
   const config = poll?.imageConfig;
   const start = toLocalInput(poll?.startAt || screening.startAt);
   const stop = toLocalInput(poll?.stopAt || screening.stopAt);
-  return `<div class="field-row"><label>Slug<input name="slug" required maxlength="64" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" value="${esc(poll?.slug || "")}"></label><label>Title<input name="title" required maxlength="200" value="${esc(poll?.title || "")}"></label></div><label>Instructions<textarea name="instructions" maxlength="2000" rows="3">${esc(poll?.instructions || "")}</textarea></label><div class="field-row"><label>Minimum selections<input name="minSelections" type="number" min="0" max="100" required value="${poll?.minSelections ?? 1}"></label><label>Maximum selections<input name="maxSelections" type="number" min="0" max="100" required value="${poll?.maxSelections ?? 1}"></label><label>Sort order<input name="sortOrder" type="number" min="0" value="${poll?.sortOrder ?? ""}"></label></div><div class="field-row"><label>Voting opens<input name="startAt" type="datetime-local" required value="${start}"></label><label>Voting closes<input name="stopAt" type="datetime-local" required value="${stop}"></label></div><div class="field-row"><label>Aspect ratio<input name="aspectRatio" required value="${esc(config?.aspectRatio || "16:9")}"></label><label>Seconds per image<input name="cycle" type="number" min="1" max="60" required value="${config?.cycle ?? 2}"></label></div><p class="help">This poll opens and closes on its own schedule. Start, stop, and the minute timer take effect immediately and do not wait for Save poll.</p>`;
+  const help = poll ? "Changes save as you edit. " : "";
+  return `<div class="field-row"><label>Slug<input name="slug" required maxlength="64" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" value="${esc(poll?.slug || "")}"></label><label>Title<input name="title" required maxlength="200" value="${esc(poll?.title || "")}"></label></div><label>Instructions<textarea name="instructions" maxlength="2000" rows="3">${esc(poll?.instructions || "")}</textarea></label><div class="field-row"><label>Minimum selections<input name="minSelections" type="number" min="0" max="100" required value="${poll?.minSelections ?? 1}"></label><label>Maximum selections<input name="maxSelections" type="number" min="0" max="100" required value="${poll?.maxSelections ?? 1}"></label></div><div class="field-row"><label>Voting opens<input name="startAt" type="datetime-local" required value="${start}"></label><label>Voting closes<input name="stopAt" type="datetime-local" required value="${stop}"></label></div><div class="field-row"><label>Aspect ratio<input name="aspectRatio" required value="${esc(config?.aspectRatio || "16:9")}"></label><label>Seconds per image<input name="cycle" type="number" min="1" max="60" required value="${config?.cycle ?? 2}"></label><label class="check">Zoomable<input name="zoomable" type="checkbox"${config?.zoomable ? " checked" : ""}></label></div><p class="help">${help}Zoomable adds a magnifier on each image so a voter can look closer. This poll opens and closes on its own schedule. Start, stop, and the minute timer take effect immediately.</p>`;
 }
 
 function optionForm(poll: Poll, option: Option | null, open = true) {
   const id = option ? `option-${option.id}` : `new-option-${poll.id}`;
   const thumbs = option ? option.imageKeys.map((key, index) => `<figure data-image-key="${esc(key)}"><img alt="" src="${esc(option.images[index] || "")}"><button type="button" data-remove-image="${esc(key)}">Remove image</button></figure>`).join("") : "";
-  return `<form id="${id}" class="option-editor"${open ? "" : " hidden"} data-option-id="${esc(option?.id || "")}"><h3>${option ? esc(option.title) : "New option"}</h3><div class="field-row"><label>Title<input name="title" required maxlength="200" value="${esc(option?.title || "")}"></label><label>Sort order<input name="sortOrder" type="number" min="0" value="${option?.sortOrder ?? ""}"></label></div><label>Description<textarea name="description" maxlength="2000" rows="2">${esc(option?.description || "")}</textarea></label>${option ? `<div class="thumbs" style="${frameStyle(poll.imageConfig?.aspectRatio)}">${thumbs}</div>` : ""}<label>${option ? "Add an image" : "Image"}<input name="file" type="file" accept="${imageAccept}"></label><div class="admin-actions"><button class="button primary" type="submit">${option ? "Save option" : "Add option"}</button>${option ? `<button class="button danger" type="button" data-delete-option="${esc(option.id)}">Delete option</button>` : collapseButton(open)}</div></form>`;
+  const heading = option ? "" : `<h3>New option</h3>`;
+  const actions = option
+    ? `<div class="admin-actions"><button class="button danger" type="button" data-delete-option="${esc(option.id)}">Delete option</button></div>`
+    : `<div class="admin-actions"><button class="button primary" type="submit">Add option</button>${collapseButton(open)}</div>`;
+  return `<form id="${id}" class="option-editor"${option || open ? "" : " hidden"} data-option-id="${esc(option?.id || "")}">${heading}<label>Title<input name="title" required maxlength="200" value="${esc(option?.title || "")}"></label><label>Description<textarea name="description" maxlength="2000" rows="2">${esc(option?.description || "")}</textarea></label>${option ? `<div class="thumbs" style="${frameStyle(poll.imageConfig?.aspectRatio)}">${thumbs}</div>` : ""}<label>${option ? "Add an image" : "Image"}<input name="file" type="file" accept="${imageAccept}"></label>${actions}</form>`;
 }
 
 function bindReveals() {
@@ -556,6 +584,18 @@ function bindDeleteScreening(screening: Screening) {
 function bindPoll(screening: Screening, poll: Poll) {
   const form = document.querySelector<HTMLFormElement>(`#poll-${poll.id}`)!;
   const ratio = form.querySelector<HTMLInputElement>("[name=aspectRatio]");
+  let timer = 0;
+  const schedule = () => {
+    window.clearTimeout(timer);
+    timer = window.setTimeout(() => void persistPoll(), saveDelayMs);
+  };
+  const persistPoll = () => enqueue(`poll:${poll.id}`, async () => {
+    if (!form.isConnected || !form.checkValidity()) return;
+    const saved = await api<Poll>(`/api/admin/screenings/${encodeURIComponent(screening.slug)}/polls/${encodeURIComponent(poll.slug)}`, { method: "PATCH", body: JSON.stringify(pollBody(form)) });
+    poll.slug = saved.slug;
+    poll.title = saved.title;
+    showMessage("Saved.");
+  });
   ratio?.addEventListener("input", () => {
     const frame = frameParts(ratio.value);
     if (!frame) return;
@@ -564,13 +604,19 @@ function bindPoll(screening: Screening, poll: Poll) {
       thumbs.style.setProperty("--frame-h", String(frame.h));
     });
   });
-  form.addEventListener("submit", async (event) => {
+  form.addEventListener("input", (event) => {
+    const target = event.target;
+    if (target instanceof HTMLInputElement && target.name === "title") {
+      const name = form.closest(".poll-block")?.querySelector(".sheet-name");
+      if (name) name.textContent = target.value || "Untitled poll";
+    }
+    schedule();
+  });
+  form.addEventListener("change", schedule);
+  form.addEventListener("submit", (event) => {
     event.preventDefault();
-    try {
-      await api(`/api/admin/screenings/${encodeURIComponent(screening.slug)}/polls/${encodeURIComponent(poll.slug)}`, { method: "PATCH", body: JSON.stringify(pollBody(form)) });
-      note("Poll saved.");
-      await render();
-    } catch (err) { fail(err); }
+    window.clearTimeout(timer);
+    void persistPoll();
   });
   form.querySelector<HTMLButtonElement>("[data-delete-poll]")!.addEventListener("click", async () => {
     if (!confirm(`Delete poll ${poll.title}?`)) return;
@@ -597,6 +643,8 @@ function bindPoll(screening: Screening, poll: Poll) {
   };
   minutesInput?.addEventListener("input", labelMinutes);
   stopButton?.addEventListener("click", () => void stopPoll(screening.slug, poll, labelMinutes()));
+  const list = block?.querySelector<HTMLElement>(".option-list");
+  if (list) bindReorder(list, ".option-sheet", () => void persistOptionOrder(screening, poll, list));
 }
 
 function bindNewPoll(screening: Screening) {
@@ -604,7 +652,8 @@ function bindNewPoll(screening: Screening) {
     event.preventDefault();
     const form = event.currentTarget as HTMLFormElement;
     try {
-      await api(`/api/admin/screenings/${encodeURIComponent(screening.slug)}/polls`, { method: "POST", body: JSON.stringify(pollBody(form)) });
+      const saved = await api<Poll>(`/api/admin/screenings/${encodeURIComponent(screening.slug)}/polls`, { method: "POST", body: JSON.stringify(pollBody(form)) });
+      expandPollId = saved.id;
       note("Poll added.");
       await render();
     } catch (err) { fail(err); }
@@ -622,29 +671,69 @@ function pollBody(form: HTMLFormElement) {
     imageConfig: {
       aspectRatio: String(data.aspectRatio || ""),
       cycle: Number(data.cycle),
+      zoomable: form.querySelector<HTMLInputElement>("[name=zoomable]")?.checked === true,
     },
     startAt: fromLocalInput(String(data.startAt || "")),
     stopAt: fromLocalInput(String(data.stopAt || "")),
   };
-  if (String(data.sortOrder || "").trim() !== "") body.sortOrder = Number(data.sortOrder);
   return body;
 }
 
 function bindOption(screening: Screening, poll: Poll, option: Option) {
   const form = document.querySelector<HTMLFormElement>(`#option-${option.id}`)!;
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    try {
-      await saveOption(screening, poll, option, form);
-      note("Option saved.");
+  let timer = 0;
+  const schedule = () => {
+    window.clearTimeout(timer);
+    timer = window.setTimeout(() => void persist(false), saveDelayMs);
+  };
+  const persist = (withFile: boolean) => enqueue(`option:${option.id}`, async () => {
+    if (!form.isConnected || !form.checkValidity()) return;
+    const file = form.querySelector<HTMLInputElement>("[name=file]")?.files?.[0];
+    if (withFile && !file) return;
+    const saved = await saveOption(screening, poll, option, form, withFile);
+    option.title = saved.title;
+    option.description = saved.description;
+    option.imageKeys = saved.imageKeys;
+    option.images = saved.images;
+    const input = form.querySelector<HTMLInputElement>("[name=file]");
+    if (input) input.value = "";
+    if (withFile) {
+      expandOptionId = option.id;
+      note("Saved.");
       await render();
-    } catch (err) { fail(err); }
+      return;
+    }
+    showMessage("Saved.");
+  });
+  form.addEventListener("input", (event) => {
+    const target = event.target;
+    if (target instanceof HTMLInputElement && target.type === "file") return;
+    if (target instanceof HTMLInputElement && target.name === "title") {
+      const name = form.closest(".option-sheet")?.querySelector(".sheet-name");
+      if (name) name.textContent = target.value || "Untitled option";
+    }
+    schedule();
+  });
+  form.addEventListener("change", (event) => {
+    const target = event.target;
+    if (target instanceof HTMLInputElement && target.type === "file") {
+      window.clearTimeout(timer);
+      void persist(true);
+      return;
+    }
+    schedule();
+  });
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    window.clearTimeout(timer);
+    void persist(false);
   });
   form.querySelectorAll<HTMLButtonElement>("[data-remove-image]").forEach((button) => {
     button.addEventListener("click", async () => {
       try {
         const imageKeys = option.imageKeys.filter((key) => key !== button.dataset.removeImage);
         await api(optionPath(screening, poll, option.id), { method: "PATCH", body: JSON.stringify({ imageKeys }) });
+        expandOptionId = option.id;
         note("Image removed.");
         await render();
       } catch (err) { fail(err); }
@@ -668,27 +757,163 @@ function bindNewOption(screening: Screening, poll: Poll) {
       const file = form.querySelector<HTMLInputElement>("[name=file]")!.files?.[0];
       const imageKeys = file ? [await upload(screening.slug, file)] : [];
       const data = formValues(form);
-      const body: Record<string, unknown> = { title: String(data.title || ""), description: String(data.description || "") || null, imageKeys };
-      if (String(data.sortOrder || "").trim() !== "") body.sortOrder = Number(data.sortOrder);
-      await api(`/api/admin/screenings/${encodeURIComponent(screening.slug)}/polls/${encodeURIComponent(poll.slug)}/options`, { method: "POST", body: JSON.stringify(body) });
+      const body = { title: String(data.title || ""), description: String(data.description || "") || null, imageKeys };
+      const saved = await api<Option>(`/api/admin/screenings/${encodeURIComponent(screening.slug)}/polls/${encodeURIComponent(poll.slug)}/options`, { method: "POST", body: JSON.stringify(body) });
+      expandPollId = poll.id;
+      expandOptionId = saved.id;
       note("Option added.");
       await render();
     } catch (err) { fail(err); }
   });
 }
 
-async function saveOption(screening: Screening, poll: Poll, option: Option, form: HTMLFormElement) {
+async function saveOption(screening: Screening, poll: Poll, option: Option, form: HTMLFormElement, withFile: boolean) {
   const data = formValues(form);
-  const imageKeys = option.imageKeys.slice();
-  const file = form.querySelector<HTMLInputElement>("[name=file]")!.files?.[0];
-  if (file) imageKeys.push(await upload(screening.slug, file));
-  const body: Record<string, unknown> = { title: String(data.title || ""), description: String(data.description || "") || null, imageKeys };
-  if (String(data.sortOrder || "").trim() !== "") body.sortOrder = Number(data.sortOrder);
-  await api(optionPath(screening, poll, option.id), { method: "PATCH", body: JSON.stringify(body) });
+  const body: Record<string, unknown> = { title: String(data.title || ""), description: String(data.description || "") || null };
+  if (withFile) {
+    const file = form.querySelector<HTMLInputElement>("[name=file]")?.files?.[0];
+    const imageKeys = option.imageKeys.slice();
+    if (file) imageKeys.push(await upload(screening.slug, file));
+    body.imageKeys = imageKeys;
+  }
+  return api<Option>(optionPath(screening, poll, option.id), { method: "PATCH", body: JSON.stringify(body) });
 }
 
 function optionPath(screening: Screening, poll: Poll, optionId: string) {
   return `/api/admin/screenings/${encodeURIComponent(screening.slug)}/polls/${encodeURIComponent(poll.slug)}/options/${encodeURIComponent(optionId)}`;
+}
+
+function rememberSheets() {
+  openPolls.clear();
+  openOptions.clear();
+  document.querySelectorAll<HTMLElement>(".poll-block").forEach((block) => {
+    const panel = block.querySelector<HTMLElement>(":scope > .sheet-panel");
+    if (panel && !panel.hidden && block.dataset.pollId) openPolls.add(block.dataset.pollId);
+  });
+  document.querySelectorAll<HTMLElement>(".option-sheet").forEach((sheet) => {
+    const panel = sheet.querySelector<HTMLElement>(":scope > .sheet-panel");
+    if (panel && !panel.hidden && sheet.dataset.optionId) openOptions.add(sheet.dataset.optionId);
+  });
+}
+
+function bindSheets() {
+  document.querySelectorAll<HTMLButtonElement>(".sheet-toggle").forEach((button) => {
+    button.addEventListener("click", () => {
+      const panel = document.getElementById(button.getAttribute("aria-controls") || "");
+      if (!(panel instanceof HTMLElement)) return;
+      const open = panel.hidden;
+      panel.hidden = !open;
+      button.setAttribute("aria-expanded", open ? "true" : "false");
+    });
+  });
+  document.querySelectorAll<HTMLElement>(".poll-block").forEach((block) => {
+    if (block.dataset.pollId && openPolls.has(block.dataset.pollId)) setSheetOpen(block, true);
+  });
+  document.querySelectorAll<HTMLElement>(".option-sheet").forEach((sheet) => {
+    if (sheet.dataset.optionId && openOptions.has(sheet.dataset.optionId)) setSheetOpen(sheet, true);
+  });
+}
+
+function setSheetOpen(root: HTMLElement, open: boolean) {
+  const panel = root.querySelector<HTMLElement>(":scope > .sheet-panel");
+  const toggle = root.querySelector<HTMLButtonElement>(":scope > .sheet-bar .sheet-toggle");
+  if (!panel || !toggle) return;
+  panel.hidden = !open;
+  toggle.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+function enqueue(key: string, job: () => Promise<void>) {
+  const previous = saveTails.get(key) || Promise.resolve();
+  const next = previous.catch(() => undefined).then(async () => {
+    try { await job(); }
+    catch (err) { fail(err); }
+  });
+  saveTails.set(key, next);
+  return next;
+}
+
+function bindPollDrag(screening: Screening) {
+  const list = document.querySelector<HTMLElement>("#poll-list");
+  if (!list) return;
+  bindReorder(list, ".poll-block", () => void persistPollOrder(screening, list));
+}
+
+async function persistPollOrder(screening: Screening, list: HTMLElement) {
+  const slugs = Array.from(list.querySelectorAll<HTMLElement>(":scope > .poll-block")).map((block) => screening.polls.find((item) => item.id === block.dataset.pollId)?.slug || "");
+  if (slugs.some((slug) => !slug)) return;
+  if (slugs.every((slug, index) => screening.polls[index]?.slug === slug)) return;
+  try {
+    await api(`/api/admin/screenings/${encodeURIComponent(screening.slug)}/polls/order`, { method: "PUT", body: JSON.stringify({ slugs }) });
+    const bySlug = new Map(screening.polls.map((poll) => [poll.slug, poll]));
+    screening.polls = slugs.map((slug, index) => {
+      const poll = bySlug.get(slug)!;
+      poll.sortOrder = index;
+      return poll;
+    });
+    showMessage("Saved.");
+  } catch (err) { fail(err); }
+}
+
+async function persistOptionOrder(screening: Screening, poll: Poll, list: HTMLElement) {
+  const ids = Array.from(list.querySelectorAll<HTMLElement>(":scope > .option-sheet")).map((sheet) => sheet.dataset.optionId || "");
+  if (ids.some((id) => !id)) return;
+  if (ids.every((id, index) => poll.options[index]?.id === id)) return;
+  try {
+    await api(`/api/admin/screenings/${encodeURIComponent(screening.slug)}/polls/${encodeURIComponent(poll.slug)}/options/order`, { method: "PUT", body: JSON.stringify({ ids }) });
+    const byId = new Map(poll.options.map((option) => [option.id, option]));
+    poll.options = ids.map((id, index) => {
+      const option = byId.get(id)!;
+      option.sortOrder = index;
+      return option;
+    });
+    showMessage("Saved.");
+  } catch (err) { fail(err); }
+}
+
+function bindReorder(list: HTMLElement, itemSelector: string, onDrop: () => void) {
+  list.querySelectorAll<HTMLElement>(itemSelector).forEach((item) => {
+    const handle = item.querySelector<HTMLElement>(":scope > .sheet-bar .drag");
+    if (!handle) return;
+    handle.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      handle.setPointerCapture(event.pointerId);
+      item.classList.add("is-dragging");
+      const move = (ev: PointerEvent) => {
+        if (ev.clientY < 72) window.scrollBy(0, -14);
+        else if (ev.clientY > window.innerHeight - 72) window.scrollBy(0, 14);
+        const target = Array.from(list.querySelectorAll<HTMLElement>(`:scope > ${itemSelector}`)).find((other) => {
+          if (other === item) return false;
+          const rect = other.getBoundingClientRect();
+          return ev.clientY >= rect.top && ev.clientY <= rect.bottom;
+        });
+        if (!target) return;
+        const rect = target.getBoundingClientRect();
+        const next = ev.clientY > rect.top + rect.height / 2 ? target.nextElementSibling : target;
+        if (next !== item) list.insertBefore(item, next);
+      };
+      const finish = () => {
+        handle.removeEventListener("pointermove", move);
+        handle.removeEventListener("pointerup", finish);
+        handle.removeEventListener("pointercancel", finish);
+        item.classList.remove("is-dragging");
+        onDrop();
+      };
+      handle.addEventListener("pointermove", move);
+      handle.addEventListener("pointerup", finish);
+      handle.addEventListener("pointercancel", finish);
+    });
+    handle.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+      const sibling = event.key === "ArrowUp" ? item.previousElementSibling : item.nextElementSibling;
+      if (!(sibling instanceof HTMLElement) || !sibling.matches(itemSelector)) return;
+      event.preventDefault();
+      if (event.key === "ArrowUp") list.insertBefore(item, sibling);
+      else list.insertBefore(item, sibling.nextSibling);
+      onDrop();
+      handle.focus();
+    });
+  });
 }
 
 function bindCodes(screening: Screening) {

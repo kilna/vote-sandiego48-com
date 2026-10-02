@@ -57,7 +57,7 @@ type ImageConfigField = {
   type: "imageConfig";
   required?: boolean;
   description: string;
-  default?: { aspectRatio: string; cycle: number };
+  default?: { aspectRatio: string; cycle: number; zoomable: boolean };
 };
 
 type Field = StringField | IntegerField | BooleanField | StringArrayField | ImageConfigField;
@@ -72,7 +72,7 @@ export type Validation =
   | { ok: true; value: Record<string, unknown> }
   | { ok: false; fields: Record<string, string> };
 
-const imageConfigDescription = "How the ballot frames and swaps stills. aspectRatio is width:height, such as 16:9 for film or 2:3 for a poster, and the public ballot uses it as the frame. cycle is how many seconds each still stays on screen before the next one. It is an integer from 1 to 60 and defaults to 2. An option shows every image uploaded for it, and more than one still crossfades. The API does not measure those files or check them against the aspect ratio.";
+const imageConfigDescription = "How the ballot frames and swaps stills. aspectRatio is width:height, such as 16:9 for film or 2:3 for a poster, and the public ballot uses it as the frame. cycle is how many seconds each still stays on screen before the next one. It is an integer from 1 to 60 and defaults to 2. zoomable is whether each image has a magnifier that opens it full screen. It defaults to false. An option shows every image uploaded for it, and more than one still crossfades. The API does not measure those files or check them against the aspect ratio.";
 
 const votingField: StringField = {
   type: "string",
@@ -117,8 +117,8 @@ export const pollWrite: ObjectSchema = {
     instructions: { type: "string", nullable: true, description: "Optional text under the heading. Send null to clear it.", example: "One vote for the film you want to win.", maxLength: 2000, default: null },
     minSelections: { type: "integer", description: "Fewest options a counted ballot includes. Defaults to 1. Picks below this are stored and omitted from results. When omitted and maxSelections is set, maxSelections must still be at least this value. Zero counts a blank poll.", example: 1, minimum: 0, maximum: 100, default: 1 },
     maxSelections: { type: "integer", description: "Most options a counted ballot includes. Defaults to minSelections. Picks above this are stored and omitted from results.", example: 1, minimum: 0, maximum: 100 },
-    imageConfig: { type: "imageConfig", description: imageConfigDescription, default: { aspectRatio: "16:9", cycle: imageCycleDefault } },
-    sortOrder: { type: "integer", description: "Position among this screening's polls. Lower numbers come first. Defaults to the next position.", example: 0, minimum: 0, maximum: 10000 },
+    imageConfig: { type: "imageConfig", description: imageConfigDescription, default: { aspectRatio: "16:9", cycle: imageCycleDefault, zoomable: false } },
+    sortOrder: { type: "integer", description: "Position among this screening's polls. Lower numbers come first. Defaults to the next position. To set the whole list in one call, use reorderPolls instead of patching this field on each poll.", example: 0, minimum: 0, maximum: 10000 },
     startAt: { type: "string", description: "When this poll opens if voting is scheduled. Defaults to the screening startAt.", example: "2026-05-01T18:00:00-07:00", pattern: TIMESTAMP, patternMessage: TIMESTAMP_MESSAGE, format: "date-time" },
     stopAt: { type: "string", description: "When this poll closes if voting is scheduled. Defaults to the screening stopAt. To stop in a number of minutes, set voting to scheduled, set startAt to now if it is still in the future, and set stopAt to that many minutes from now.", example: "2026-05-01T23:00:00-07:00", pattern: TIMESTAMP, patternMessage: TIMESTAMP_MESSAGE, format: "date-time" },
     voting: votingField,
@@ -149,7 +149,7 @@ export const optionWrite: ObjectSchema = {
     title: { type: "string", required: true, description: "Name shown on the ballot.", example: "Orange Hour", minLength: 1, maxLength: 200 },
     description: { type: "string", nullable: true, description: "Optional supporting text. Send null to clear it.", example: "Team Halftone.", maxLength: 2000, default: null },
     imageKeys: { type: "stringArray", description: "Keys returned by uploadScreeningImage, in display order. Sending this list replaces the option's images. The same key may be reused by more than one option.", example: ["00000000-0000-4000-8000-000000000000/orange-hour-1.jpg"], maxItems: 12, itemMinLength: 1, itemMaxLength: 300, default: [] },
-    sortOrder: { type: "integer", description: "Position among this poll's options. Lower numbers come first. Defaults to the next position.", example: 0, minimum: 0, maximum: 10000 },
+    sortOrder: { type: "integer", description: "Position among this poll's options. Lower numbers come first. Defaults to the next position. To set the whole list in one call, use reorderOptions instead of patching this field on each option.", example: 0, minimum: 0, maximum: 10000 },
   },
 };
 
@@ -161,6 +161,22 @@ export const optionPatch: ObjectSchema = {
     imageKeys: optionWrite.fields.imageKeys,
     sortOrder: optionWrite.fields.sortOrder,
   },
+};
+
+export const pollOrder: ObjectSchema = {
+  description: "The complete poll order for one screening. slugs lists every poll slug on that screening exactly once, first to last. The first slug becomes sortOrder 0.",
+  fields: {
+    slugs: { type: "stringArray", required: true, description: "Every poll slug on this screening, in the order they should appear. Omit none, and list none twice.", example: ["best-film", "best-poster"], minItems: 0, maxItems: 200, itemMinLength: 1, itemMaxLength: 64, itemPattern: SLUG, itemPatternMessage: SLUG_MESSAGE },
+  },
+  refine: (value) => uniqueItems(value, "slugs"),
+};
+
+export const optionOrder: ObjectSchema = {
+  description: "The complete option order for one poll. ids lists every option id on that poll exactly once, first to last. The first id becomes sortOrder 0.",
+  fields: {
+    ids: { type: "stringArray", required: true, description: "Every option id on this poll, in the order they should appear. Omit none, and list none twice.", example: ["00000000-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000002"], minItems: 0, maxItems: 200, itemMinLength: 1, itemMaxLength: 80 },
+  },
+  refine: (value) => uniqueItems(value, "ids"),
 };
 
 export const voteCodeGenerate: ObjectSchema = {
@@ -195,7 +211,21 @@ export const examples = {
     sortOrder: 0,
   },
   codes: { count: 25 },
+  pollOrder: { slugs: ["best-film", "best-poster"] },
+  optionOrder: { ids: ["00000000-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000002"] },
 };
+
+function uniqueItems(value: Record<string, unknown>, key: string): Record<string, string> {
+  const items = value[key];
+  if (!Array.isArray(items)) return {};
+  const seen = new Set<string>();
+  for (const item of items) {
+    if (typeof item !== "string") continue;
+    if (seen.has(item)) return { [key]: `"${item}" is listed more than once.` };
+    seen.add(item);
+  }
+  return {};
+}
 
 function dateOrder(value: Record<string, unknown>): Record<string, string> {
   if (typeof value.startAt !== "string" || typeof value.stopAt !== "string") return {};
@@ -278,15 +308,16 @@ function validateStringArray(field: StringArrayField, input: unknown): { value: 
 function validateImageConfig(input: unknown): { value: unknown } | { error: string } {
   if (input === null || typeof input !== "object" || Array.isArray(input)) return { error: "Send an object with aspectRatio and cycle." };
   const source = input as Record<string, unknown>;
-  const unknown = Object.keys(source).filter((key) => !["aspectRatio", "cycle"].includes(key));
+  const unknown = Object.keys(source).filter((key) => !["aspectRatio", "cycle", "zoomable"].includes(key));
   if (unknown.length) return { error: `Unknown field ${unknown[0]}.` };
   if (typeof source.aspectRatio !== "string" || !new RegExp(RATIO).test(source.aspectRatio.trim())) return { error: "aspectRatio must look like 16:9 or 2:3." };
   if (source.cycle !== undefined && (typeof source.cycle !== "number" || !Number.isInteger(source.cycle) || source.cycle < imageCycleMin || source.cycle > imageCycleMax)) return { error: `cycle must be an integer from ${imageCycleMin} to ${imageCycleMax}.` };
-  return { value: { aspectRatio: source.aspectRatio.trim(), cycle: source.cycle === undefined ? imageCycleDefault : source.cycle } };
+  if (source.zoomable !== undefined && typeof source.zoomable !== "boolean") return { error: "zoomable must be true or false." };
+  return { value: { aspectRatio: source.aspectRatio.trim(), cycle: source.cycle === undefined ? imageCycleDefault : source.cycle, zoomable: source.zoomable === true } };
 }
 
 export type AdminRoute = {
-  method: "GET" | "POST" | "PATCH" | "DELETE";
+  method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
   parts: string[];
   operationId: string;
   summary: string;
@@ -304,10 +335,12 @@ const requestSchemas = {
   OptionWrite: optionWrite,
   OptionPatch: optionPatch,
   VoteCodeGenerate: voteCodeGenerate,
+  PollOrder: pollOrder,
+  OptionOrder: optionOrder,
 };
 
 export const adminRoutes: AdminRoute[] = [
-  { method: "GET", parts: [], operationId: "getAdminIndex", summary: "Discover admin operations", description: "Start here after authenticating. Follow workflows.createScreening in order to publish a ballot without guessing field names.", response: "AdminIndex", status: 200 },
+  { method: "GET", parts: [], operationId: "getAdminIndex", summary: "Discover admin operations", description: "Start here after authenticating. Follow workflows.createScreening in order to publish a ballot without guessing field names. Follow workflows.reorder to set poll and option order in one request each.", response: "AdminIndex", status: 200 },
   { method: "GET", parts: ["screenings"], operationId: "listScreenings", summary: "List screenings", description: "Each item links to the screening, its polls, image upload, vote codes, and results.", response: "ScreeningList", status: 200 },
   { method: "POST", parts: ["screenings"], operationId: "createScreening", summary: "Create a screening", description: "Create the screening, then upload images, add polls and options, and generate vote codes. A duplicate slug returns 409.", body: "ScreeningWrite", response: "Screening", status: 201 },
   { method: "GET", parts: ["screenings", ":slug"], operationId: "getScreening", summary: "Read a screening", description: "Returns the screening with its polls and options.", response: "Screening", status: 200 },
@@ -317,13 +350,15 @@ export const adminRoutes: AdminRoute[] = [
   { method: "GET", parts: ["screenings", ":slug", "polls"], operationId: "listPolls", summary: "List polls", description: "Polls are ordered by sortOrder, then title. Each poll includes its options.", response: "PollList", status: 200 },
   { method: "POST", parts: ["screenings", ":slug", "polls"], operationId: "createPoll", summary: "Create a poll", description: "Add a poll to a screening. A duplicate poll slug within the screening returns 409.", body: "PollWrite", response: "Poll", status: 201 },
   { method: "GET", parts: ["screenings", ":slug", "polls", ":pollSlug"], operationId: "getPoll", summary: "Read a poll", description: "Returns one poll and its options.", response: "Poll", status: 200 },
-  { method: "PATCH", parts: ["screenings", ":slug", "polls", ":pollSlug"], operationId: "updatePoll", summary: "Update a poll", description: "Changes only the fields you send. When both selection bounds are present, maxSelections must be at least minSelections. When only one is sent, it is checked against the stored value of the other. Set voting to open or closed to start or stop this poll immediately, or scheduled to follow its startAt and stopAt. To stop in a number of minutes, set voting to scheduled and stopAt to that time. If startAt is still in the future, set it to now so the poll stays open until the new stopAt.", body: "PollPatch", response: "Poll", status: 200 },
+  { method: "PATCH", parts: ["screenings", ":slug", "polls", ":pollSlug"], operationId: "updatePoll", summary: "Update a poll", description: "Changes only the fields you send. When both selection bounds are present, maxSelections must be at least minSelections. When only one is sent, it is checked against the stored value of the other. Set voting to open or closed to start or stop this poll immediately, or scheduled to follow its startAt and stopAt. To stop in a number of minutes, set voting to scheduled and stopAt to that time. If startAt is still in the future, set it to now so the poll stays open until the new stopAt. To reorder every poll at once, use reorderPolls.", body: "PollPatch", response: "Poll", status: 200 },
   { method: "DELETE", parts: ["screenings", ":slug", "polls", ":pollSlug"], operationId: "deletePoll", summary: "Delete a poll", description: "Deletes the poll, its options, and votes cast in that poll. Uploaded images stay in storage so other options can keep using them.", response: "Deleted", status: 200 },
+  { method: "PUT", parts: ["screenings", ":slug", "polls", "order"], operationId: "reorderPolls", summary: "Reorder polls", description: "Sets the ballot order of every poll on this screening in one request. slugs must list each poll slug exactly once, first to last. The response polls are in that order. This is the call an agent uses instead of dragging.", body: "PollOrder", response: "PollList", status: 200 },
   { method: "GET", parts: ["screenings", ":slug", "polls", ":pollSlug", "options"], operationId: "listOptions", summary: "List options", description: "Options are ordered by sortOrder, then title.", response: "OptionList", status: 200 },
   { method: "POST", parts: ["screenings", ":slug", "polls", ":pollSlug", "options"], operationId: "createOption", summary: "Create an option", description: "imageKeys must already have been uploaded to this screening. The response id is what voters save.", body: "OptionWrite", response: "Option", status: 201 },
   { method: "GET", parts: ["screenings", ":slug", "polls", ":pollSlug", "options", ":optionId"], operationId: "getOption", summary: "Read an option", description: "Returns one option.", response: "Option", status: 200 },
-  { method: "PATCH", parts: ["screenings", ":slug", "polls", ":pollSlug", "options", ":optionId"], operationId: "updateOption", summary: "Update an option", description: "Changes only the fields you send. imageKeys replaces the entire still list.", body: "OptionPatch", response: "Option", status: 200 },
+  { method: "PATCH", parts: ["screenings", ":slug", "polls", ":pollSlug", "options", ":optionId"], operationId: "updateOption", summary: "Update an option", description: "Changes only the fields you send. imageKeys replaces the entire still list. To reorder every option on this poll at once, use reorderOptions.", body: "OptionPatch", response: "Option", status: 200 },
   { method: "DELETE", parts: ["screenings", ":slug", "polls", ":pollSlug", "options", ":optionId"], operationId: "deleteOption", summary: "Delete an option", description: "Deletes the option and votes for it. Uploaded images stay in storage.", response: "Deleted", status: 200 },
+  { method: "PUT", parts: ["screenings", ":slug", "polls", ":pollSlug", "options", "order"], operationId: "reorderOptions", summary: "Reorder options", description: "Sets the ballot order of every option on this poll in one request. ids must list each option id exactly once, first to last. The response options are in that order. This is the call an agent uses instead of dragging.", body: "OptionOrder", response: "OptionList", status: 200 },
   { method: "POST", parts: ["screenings", ":slug", "images"], operationId: "uploadScreeningImage", summary: "Upload an image", description: "Send the raw image bytes. Set Content-Type to an allowed image type and X-Filename to the basename. The response key is what you store as bannerImageKey or in imageKeys. Uploading the same filename again replaces the object.", response: "ImageCreated", status: 201 },
   { method: "GET", parts: ["screenings", ":slug", "codes"], operationId: "getVoteCodes", summary: "List vote codes", description: "Returns every code whose text was stored, in code order, plus counts. used on a code is true after that code has saved a pick. The same code can change polls that are still open. unlisted counts older rows that still work but have no saved text, so they are omitted from codes. Each code's public entry URL is https://vote.sandiego48.com/c/{code}.", response: "CodeList", status: 200 },
   { method: "POST", parts: ["screenings", ":slug", "codes"], operationId: "generateVoteCodes", summary: "Generate vote codes", description: "Creates count new codes and returns them in created. A code is unique across the site. The text is stored for download. Voting compares a SHA-256 hash, and spaces and hyphens in what the voter types are ignored.", body: "VoteCodeGenerate", response: "CodeGenerateResult", status: 200 },
@@ -387,6 +422,10 @@ export function adminIndex() {
         { step: "Generate vote codes. Send count. created lists the new codes.", method: "POST", href: "/api/admin/screenings/{slug}/codes", operationId: "generateVoteCodes" },
         { step: "Download every stored code, including ones generated earlier.", method: "GET", href: "/api/admin/screenings/{slug}/codes", operationId: "getVoteCodes" },
       ],
+      reorder: [
+        { step: "Replace the poll order. slugs lists every poll slug on the screening, first to last.", method: "PUT", href: "/api/admin/screenings/{slug}/polls/order", operationId: "reorderPolls" },
+        { step: "Replace one poll's option order. ids lists every option id on that poll, first to last.", method: "PUT", href: "/api/admin/screenings/{slug}/polls/{pollSlug}/options/order", operationId: "reorderOptions" },
+      ],
     },
   };
 }
@@ -433,6 +472,7 @@ const imageConfigSchema = {
   properties: {
     aspectRatio: { type: "string", pattern: RATIO, description: "Width:height, such as 16:9 or 2:3.", examples: ["16:9"] },
     cycle: { type: "integer", minimum: imageCycleMin, maximum: imageCycleMax, description: "Seconds each still stays on screen. The ballot crossfades to the next uploaded image after this many seconds when an option has more than one.", default: imageCycleDefault },
+    zoomable: { type: "boolean", description: "When true, each image on this poll has a magnifier that opens it full screen.", default: false },
   },
 };
 
@@ -521,7 +561,7 @@ export function openapiDocument() {
         ImageConfig: imageConfigSchema,
         Error: errorSchema,
         PublicIndex: { type: "object", description: "Public discovery document returned by GET /api." },
-        AdminIndex: { type: "object", description: "Admin discovery document. workflows.createScreening is the supported order of calls." },
+        AdminIndex: { type: "object", description: "Admin discovery document. workflows.createScreening is the supported order of calls for a new screening. workflows.reorder replaces poll and option order in one request each." },
         OpenApiDocument: { type: "object" },
         ScreeningList: { type: "object", required: ["screenings"], properties: { screenings: { type: "array", items: { $ref: "#/components/schemas/ScreeningSummary" } } } },
         ScreeningSummary: resourceSchema(["id", "slug", "title", "venue", "timezone", "startAt", "stopAt", "bannerImageKey", "bannerImage", "links"]),
@@ -706,7 +746,7 @@ function responses(status: number, schema: string) {
 }
 
 function jsonBody(schema: string, admin: boolean) {
-  const example = schema === "ScreeningWrite" ? examples.screeningCreate : schema === "PollWrite" ? examples.pollCreate : schema === "OptionWrite" ? examples.optionCreate : schema === "VoteCodeGenerate" ? examples.codes : undefined;
+  const example = schema === "ScreeningWrite" ? examples.screeningCreate : schema === "PollWrite" ? examples.pollCreate : schema === "OptionWrite" ? examples.optionCreate : schema === "VoteCodeGenerate" ? examples.codes : schema === "PollOrder" ? examples.pollOrder : schema === "OptionOrder" ? examples.optionOrder : undefined;
   return {
     required: true,
     content: { "application/json": compact({ schema: { $ref: `#/components/schemas/${schema}` }, example: admin ? example : undefined }) },

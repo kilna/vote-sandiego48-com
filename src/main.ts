@@ -12,7 +12,7 @@ type Poll = {
   instructions: string;
   minSelections: number;
   maxSelections: number;
-  imageConfig?: { aspectRatio?: string; cycle?: number };
+  imageConfig?: { aspectRatio?: string; cycle?: number; zoomable?: boolean };
   startAt: string;
   stopAt: string;
   voting?: Voting;
@@ -103,7 +103,7 @@ function renderPoll(poll: Poll) {
     const image = option.images.length ? ` data-cycle='${esc(JSON.stringify(option.images))}' data-seconds="${seconds}" style="aspect-ratio:${ratio}"` : ` style="aspect-ratio:${ratio}"`;
     const checked = chosen.has(option.id) ? " checked" : "";
     const disabled = open ? "" : " disabled";
-    const zoom = option.images.length ? posterZoomButton(esc(option.title)) : "";
+    const zoom = poll.imageConfig?.zoomable && option.images.length ? posterZoomButton(esc(option.title)) : "";
     return `<label class="option"><input type="${type}" name="poll-${poll.id}" value="${esc(option.id)}"${checked}${disabled}/><span class="option-image"${image}></span>${zoom}<span class="option-copy"><strong>${esc(option.title)}</strong>${option.description ? `<small>${esc(option.description)}</small>` : ""}</span></label>`;
   }).join("");
   const rule = poll.minSelections === poll.maxSelections ? `Select ${poll.minSelections}` : `Select ${poll.minSelections}–${poll.maxSelections}`;

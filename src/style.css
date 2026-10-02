@@ -155,7 +155,7 @@ h1 {
   font-weight: 700;
 }
 
-p { margin: 0.7rem 0; }
+p { margin-block: 0.7rem; }
 
 .change-code { font-weight: 700; }
 
@@ -202,7 +202,7 @@ main.home .gate {
   box-sizing: border-box;
   width: 100vw;
   margin-left: calc(50% - 50vw);
-  padding: 0.55rem var(--pin-gutter) 0.7rem;
+  padding: 1rem var(--pin-gutter) 0.7rem;
   background: linear-gradient(180deg, var(--48-white) 0%, var(--48-white) 78%, rgb(255 255 255 / 0.94) 100%);
   box-shadow: 0 0.55rem 0.7rem -0.35rem rgb(9 45 72 / 0.16);
 }
@@ -325,19 +325,19 @@ main.home .gate {
   justify-self: start;
   align-self: end;
   z-index: 4;
-  width: 3.4rem;
-  height: 3.4rem;
-  margin: 0 0 0.55rem 0.55rem;
+  width: 2.35rem;
+  height: 2.35rem;
+  margin: 0 0 0.4rem 0.4rem;
   padding: 0;
-  border: 0.18rem solid var(--48-white);
+  border: 0.12rem solid var(--48-white);
   border-radius: 999px;
   background: var(--48-purple);
   color: var(--48-white);
-  box-shadow: 0 0.15rem 0.45rem rgb(0 0 0 / 0.4);
+  box-shadow: 0 0.1rem 0.3rem rgb(0 0 0 / 0.4);
   cursor: pointer;
 }
 
-.zoom svg { width: 1.75rem; height: 1.75rem; }
+.zoom svg { width: 1.2rem; height: 1.2rem; }
 
 .zoom:focus-visible {
   outline: 3px solid var(--48-navy);
@@ -677,7 +677,113 @@ input:not([type="radio"]):not([type="checkbox"]):focus-visible {
 
 .stack { display: grid; gap: 0.9rem; }
 
-.poll-block { gap: 1.15rem; margin: 1rem 0; }
+.poll-block { gap: 0.85rem; margin-block: 1rem; }
+
+.sheet-list { display: grid; gap: 0.75rem; }
+
+.sheet-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.drag {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 2.2rem;
+  height: 2.2rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0.35rem;
+  background: var(--48-purple);
+  color: var(--48-white);
+  cursor: grab;
+  touch-action: none;
+}
+
+.drag:active { cursor: grabbing; }
+
+.drag:focus-visible,
+.sheet-toggle:focus-visible {
+  outline: 3px solid var(--48-orange);
+  outline-offset: 2px;
+}
+
+.grip {
+  display: block;
+  width: 0.95rem;
+  height: 0.72rem;
+  background:
+    linear-gradient(currentColor, currentColor) 0 0 / 100% 0.12rem,
+    linear-gradient(currentColor, currentColor) 0 50% / 100% 0.12rem,
+    linear-gradient(currentColor, currentColor) 0 100% / 100% 0.12rem;
+  background-repeat: no-repeat;
+}
+
+.sheet-toggle {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+  min-height: 2.6rem;
+  padding: 0.2rem 0.15rem;
+  border: 0;
+  background: transparent;
+  color: var(--48-navy);
+  font: inherit;
+  font-size: 1.35rem;
+  font-weight: 800;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sheet-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sheet-toggle::after {
+  content: "";
+  flex: none;
+  width: 0.55rem;
+  height: 0.55rem;
+  margin-right: 0.35rem;
+  border-right: 0.16rem solid currentColor;
+  border-bottom: 0.16rem solid currentColor;
+  transform: rotate(45deg) translateY(-0.12rem);
+}
+
+.sheet-toggle[aria-expanded="true"]::after {
+  transform: rotate(-135deg) translateY(-0.12rem);
+}
+
+.sheet-panel[hidden] { display: none; }
+
+.poll-block.is-dragging,
+.option-sheet.is-dragging { opacity: 0.55; }
+
+.option-sheet {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.35rem 0.7rem 0.45rem;
+  border: 0.125rem solid var(--48-purple);
+  border-radius: 0.4rem;
+  background: var(--48-navy-nearwhite);
+}
+
+.option-sheet .sheet-toggle { font-size: 1.1rem; min-height: 2.2rem; }
+
+.option-sheet .option-editor {
+  margin: 0;
+  padding: 0.2rem 0 0.35rem;
+  border: 0;
+  background: transparent;
+}
 
 .add-toggle-row { margin: 0.35rem 0 0.9rem; }
 .poll-options .add-toggle-row { margin: 0; }
@@ -704,7 +810,7 @@ input:not([type="radio"]):not([type="checkbox"]):focus-visible {
 }
 
 .section-title {
-  margin: 1.4rem 0 0.4rem;
+  margin-block: 1.4rem 0.4rem;
   color: var(--48-navy);
   font-size: clamp(1.45rem, 3vw, 1.9rem);
   font-weight: 800;
@@ -715,7 +821,7 @@ input:not([type="radio"]):not([type="checkbox"]):focus-visible {
 .editor {
   display: grid;
   gap: 0.85rem;
-  margin: 0.8rem 0;
+  margin-block: 0.8rem;
   padding: 1rem 1.05rem 1.1rem;
   border: 0.2rem solid var(--48-navy);
   border-radius: 0.5rem;
@@ -739,6 +845,19 @@ input:not([type="radio"]):not([type="checkbox"]):focus-visible {
   gap: 0.3rem;
   color: var(--48-navy);
   font-weight: 800;
+}
+
+.editor label.check {
+  flex-direction: row;
+  align-items: center;
+  align-self: end;
+  gap: 0.55rem;
+  min-height: 2.6rem;
+}
+
+.editor label.check input {
+  width: 1.35rem;
+  height: 1.35rem;
 }
 
 .field-row {
