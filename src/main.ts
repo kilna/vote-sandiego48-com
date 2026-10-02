@@ -65,7 +65,7 @@ function saveEntry(entry: Entry) { sessionStorage.setItem(entryKey, JSON.stringi
 function clearEntry() { sessionStorage.removeItem(entryKey); }
 function brandHeader(hasHero = false) { return `<header class="masthead${hasHero ? " has-hero" : ""}"><a class="logo-link" href="/"><img class="logo" src="/logo-horiz-trans.png" alt="San Diego 48 Hour Film Project" width="2046" height="560"></a></header>`; }
 function unavailable(message: string) { app.innerHTML = `${brandHeader()}<main class="home"><section class="intro"><h1>${esc(message)}</h1><p>Check the code on your event ticket, then start again from the home page.</p><p><a class="change-code" href="/">Enter a vote code</a></p></section></main>`; }
-function frameRatio(value?: string) { const match = /^(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)$/.exec(value || ""); return match ? `${match[1]} / ${match[2]}` : "16 / 9"; }
+function frameVars(value?: string) { const match = /^(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)$/.exec(value || ""); return `--frame-w:${match?.[1] || "16"};--frame-h:${match?.[2] || "9"}`; }
 function cycleSeconds(value: unknown) { const seconds = typeof value === "number" ? value : Number(value); return Number.isInteger(seconds) && seconds >= 1 && seconds <= 60 ? seconds : 2; }
 function pollOpen(poll: Poll) { return poll.votingOpen === true; }
 function serverNow() { return Date.now() + skewMs; }
@@ -90,24 +90,61 @@ function render(s: Event) {
   }
   syncCountdowns();
   watchVoting();
+  watchOptionFit();
 }
 
 function renderPoll(poll: Poll) {
   const open = pollOpen(poll);
-  const ratio = frameRatio(poll.imageConfig?.aspectRatio);
+  const frame = frameVars(poll.imageConfig?.aspectRatio);
   const seconds = cycleSeconds(poll.imageConfig?.cycle);
   const chosen = new Set(selections[poll.id] || []);
   const type = poll.maxSelections === 1 && poll.minSelections > 0 ? "radio" : "checkbox";
   const options = poll.options.map((option) => {
-    const image = option.images.length ? ` data-cycle='${esc(JSON.stringify(option.images))}' data-seconds="${seconds}" style="aspect-ratio:${ratio}"` : ` style="aspect-ratio:${ratio}"`;
+    const cycle = option.images.length ? ` data-cycle='${esc(JSON.stringify(option.images))}' data-seconds="${seconds}"` : "";
     const checked = chosen.has(option.id) ? " checked" : "";
     const disabled = open ? "" : " disabled";
     const zoom = poll.imageConfig?.zoomable && option.images.length ? posterZoomButton(esc(option.title)) : "";
-    return `<label class="option"><input type="${type}" name="poll-${poll.id}" value="${esc(option.id)}"${checked}${disabled}/><span class="option-image"${image}></span>${zoom}<span class="option-copy"><strong>${esc(option.title)}</strong>${option.description ? `<small>${esc(option.description)}</small>` : ""}</span></label>`;
+    return `<label class="option"><input type="${type}" name="poll-${poll.id}" value="${esc(option.id)}"${checked}${disabled}/><span class="option-media" style="${frame}"><span class="option-image"${cycle}></span>${zoom}</span><span class="option-copy"><strong>${esc(option.title)}</strong>${option.description ? `<small>${esc(option.description)}</small>` : ""}</span></label>`;
   }).join("");
   const rule = poll.minSelections === poll.maxSelections ? `Select ${poll.minSelections}` : `Select ${poll.minSelections}–${poll.maxSelections}`;
   const titleId = `poll-${poll.id}-title`;
   return `<fieldset class="poll${open ? "" : " is-closed"}" data-poll="${esc(poll.id)}" aria-labelledby="${esc(titleId)}"><div class="poll-pin"><div class="poll-heading"><h2 class="poll-title" id="${esc(titleId)}">${esc(poll.title)}</h2><span class="rule">${rule}</span></div><div class="countdown" data-countdown="${esc(poll.id)}" hidden><span class="countdown-prefix"></span><span class="countdown-clock"></span></div><p class="window" data-window="${esc(poll.id)}" hidden></p><p class="pick-status" data-pick-status="${esc(poll.id)}" role="status"></p></div>${poll.instructions ? `<p class="instructions">${esc(poll.instructions)}</p>` : ""}<div class="options">${options}</div></fieldset>`;
+}
+
+let stopFit: (() => void) | null = null;
+
+function fitOptions() {
+  const view = window.visualViewport?.height ?? window.innerHeight;
+  document.querySelectorAll<HTMLElement>(".poll").forEach((poll) => {
+    const pin = poll.querySelector<HTMLElement>(".poll-pin");
+    const pinHeight = pin?.getBoundingClientRect().height ?? 0;
+    poll.style.setProperty("--pin-block", `${pinHeight}px`);
+    poll.querySelectorAll<HTMLElement>(".option").forEach((option) => {
+      const copy = option.querySelector<HTMLElement>(".option-copy");
+      const copyHeight = copy?.getBoundingClientRect().height ?? 0;
+      const style = getComputedStyle(option);
+      const border = (parseFloat(style.borderTopWidth) || 0) + (parseFloat(style.borderBottomWidth) || 0);
+      const imageMax = Math.max(72, view - pinHeight - copyHeight - border - 16);
+      const next = `${Math.floor(imageMax)}px`;
+      if (option.style.getPropertyValue("--fit-image") !== next) option.style.setProperty("--fit-image", next);
+    });
+  });
+}
+
+function watchOptionFit() {
+  stopFit?.();
+  const fit = () => fitOptions();
+  const observer = new ResizeObserver(fit);
+  document.querySelectorAll(".poll-pin, .option-copy").forEach((node) => observer.observe(node));
+  const viewport = window.visualViewport;
+  window.addEventListener("resize", fit);
+  viewport?.addEventListener("resize", fit);
+  fit();
+  stopFit = () => {
+    observer.disconnect();
+    window.removeEventListener("resize", fit);
+    viewport?.removeEventListener("resize", fit);
+  };
 }
 
 function bindPoll(poll: Poll) {

@@ -19,7 +19,7 @@ The home page, or `/c/<code>`, posts the ticket code to `POST /api/enter`. A rec
 
 The open ballot posts `POST /api/state` about every 3 seconds while the tab is visible. That response is the server clock, whether each poll is open, and the picks stored for the code. The page updates the pinned header from it, including the countdown. When those stored picks replace what the phone was showing and the count is outside the minimum and maximum, or the poll is closed with a count outside that range, the header says the saved vote does not count.
 
-The ballot frames stills with the poll's aspect ratio and fits each image inside that frame. An option with more than one still crossfades after `imageConfig.cycle` seconds, which defaults to 2. When `imageConfig.zoomable` is true, each image has a magnifier that opens it full screen. Uploaded files are not checked against the aspect ratio.
+The ballot frames stills with the poll's aspect ratio and fits each image inside that frame. The frame shrinks so one whole option, title included, fits on the screen under that poll's sticky header. An option with more than one still crossfades after `imageConfig.cycle` seconds, which defaults to 2. When `imageConfig.zoomable` is true, each image has a magnifier that opens it full screen. Uploaded files are not checked against the aspect ratio.
 
 The event `timezone` is a label. The admin form reads times in the browser's timezone and stores UTC instants. The ballot formats those instants in the viewer's timezone.
 
